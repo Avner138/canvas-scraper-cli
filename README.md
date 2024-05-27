@@ -1,4 +1,4 @@
-# Canvas-Scraper CLI
+# Canvas Scraper CLI
 
 A NodeJS command-line interface for scraping and downloading data (e.g. assignments and modules) from a Canvas course.
 
