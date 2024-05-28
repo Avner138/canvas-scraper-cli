@@ -25,7 +25,7 @@ const exported = {
    * @returns {string} string with invalid characters replaced with "-"
    */
   stripInvalid(string) {
-    return string.replaceAll(/[/\\?%*:|"<>]/g, "-");
+    return string.replaceAll(/[/\\?%*:|"<>]/g, "-").trim();
   },
 
   /**
