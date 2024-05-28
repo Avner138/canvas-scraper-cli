@@ -59,6 +59,25 @@ Options:
 
 You must use the 'a' and/or 'm' flags, otherwise no data will be scraped.
 
+## Download File Structure
+
+- ASSIGNMENTS
+  - [\<Assignment\> (<(Grade %) or (Points Earned/Total Points) or (N/A) or (✅ or ❌)>)]
+    - .ASSIGNMENT
+      - .ASSIGNMENT.pdf
+      - {Embedded Files}
+    - .COMMENTS.txt
+    - .SUBMISSIONDETAILS.pdf
+    - {Submission Files}
+  - .ASSIGNMENTS.pdf
+- MODULES
+  - MODULE SECTION
+    - MODULE NAME
+      - .MODULE.pdf
+      - {Embedded Files}
+  - MODULES.pdf
+- .HOMEPAGE.pdf
+
 ## Video Tutorial
 
 Watch the video below for a quick guide on how to download and use the CLI!
