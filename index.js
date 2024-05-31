@@ -18,6 +18,21 @@ program
   .option("-a", "scrape assignments", false)
   .option("-m", "scrape modules", false)
   .action(async (url, options) => {
+    // url parsing
+    const regex = /^https:\/\/([^/]+)\/courses\/([^/]+)(\/.*)?$/;
+
+    const match = url.match(regex);
+    if (!match) {
+      console.log(
+        "Invalid URL format. The URL should match the pattern https://<domain>/courses/<courseid>"
+      );
+      process.exit(1);
+    }
+
+    const domain = match[1];
+    const courseid = match[2];
+    url = `https://${domain}/courses/${courseid}`;
+
     console.log(`*** SCRAPING COURSE FROM ${url} ***`);
     console.log(`FLAGS: ${JSON.stringify(options)}`);
 

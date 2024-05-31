@@ -3,52 +3,6 @@ import helpers from "../helpers.js";
 
 const exported = {
   /**
-   * Gets the assignments from the current page
-   * @param {Page} page page to get assignments from
-   * @returns {Promise<Array<object>>} array of assignments
-   */
-  async getAssignments(page) {
-    return await page.evaluate(() => {
-      let assignmentList = Array.from(
-        document.querySelectorAll("#ag-list > ul .assignment .ig-info")
-      );
-
-      assignmentList = assignmentList.map((assignment) => {
-        let url = assignment.querySelector("a").href;
-        let name = assignment.querySelector("a").innerText;
-        let grade;
-        try {
-          grade = assignment.querySelector(".score-display").innerText;
-        } catch (e) {
-          grade = "NA";
-        }
-
-        return { url, name, grade };
-      });
-      return assignmentList.filter((a) => !a.url.includes("reviewee_id="));
-    });
-  },
-
-  /**
-   * Prints a summary of the scraping process
-   * @param {Array<object>} assignments array of assignments
-   * @param {object} problematic object containing problematic assignment names and their files that failed to download
-   */
-  async printSummary(assignments, problematic) {
-    console.log("--- ASSIGNMENTS SCRAPING SUMMARY ---");
-    console.log(`TOTAL ASSIGNMENTS: ${assignments.length}`);
-    if (Object.keys(problematic).length > 0) {
-      console.log("WARNING: Some files could not be downloaded");
-      for (let assignment of Object.keys(problematic)) {
-        console.log(`ASSIGNMENT ${assignment}`);
-        for (let file of problematic[assignment]) {
-          console.log(`  ${file}`);
-        }
-      }
-    }
-  },
-
-  /**
    * Scrapes an assignment description
    * @param {page} page page to scrape from
    * @param {string} dir directory to save to
@@ -62,17 +16,14 @@ const exported = {
       format: "Letter",
     });
 
-    // gather links to files embeded in assignment description
-    let dLinks = await page.evaluate(() => {
-      return Array.from(
-        document.querySelectorAll("#assignment_show .description a")
-      )
-        .map((a) => a.href)
-        .filter((url) => url.includes("download?download"));
-    });
-
-    // download files and return problematic ones
-    return await helpers.downloadFiles(dLinks, cookies, dir);
+    // gather and download links to files embeded in assignment description
+    return helpers.searchAndDownload(
+      page,
+      cookies,
+      dir,
+      "#assignment_show .description a",
+      "download?download"
+    );
   },
 
   async scrapeSubmissionDetails(page, cookies, dir) {
@@ -106,16 +57,14 @@ const exported = {
     } catch (e) {
       console.log("ERROR: COULD NOT SCRAPE SUBMISSION DETAILS");
     }
-
-    // gather links to files submitted by student
-    let sLinks = await page.evaluate(() => {
-      return Array.from(document.querySelectorAll(".content a"))
-        .map((a) => a.href)
-        .filter((url) => url.includes("?download"));
-    });
-
-    // download files and return problematic ones
-    return await helpers.downloadFiles(sLinks, cookies, dir);
+    // gather and download links to files submitted by student
+    return helpers.searchAndDownload(
+      page,
+      cookies,
+      dir,
+      ".content a",
+      "?download"
+    );
   },
 
   /**
