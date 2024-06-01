@@ -2,13 +2,13 @@ import fs from "fs";
 import helpers from "../helpers.js";
 import aHelpers from "./helpers.js";
 
-const scrapeAssignment = async (
+async function scrapeAssignment(
   browser,
   cookies,
   dir,
   sectionName,
   assignment
-) => {
+) {
   helpers.print(
     "NOTE",
     `ASSIGNMENT '${assignment.name}'`,
@@ -82,7 +82,7 @@ const scrapeAssignment = async (
   helpers.print("NOTE", `ASSIGNMENT '${assignment.name}'`, `DONE SCRAPING`, 1);
   page.close();
   return problematic;
-};
+}
 
 async function getAssignments(page) {
   return await helpers.getSections(
@@ -93,7 +93,7 @@ async function getAssignments(page) {
   );
 }
 
-const scrapeAssignments = async (browser, cookies, url, dir) => {
+async function scrapeAssignments(browser, cookies, url, dir) {
   await helpers.scrapeSections(
     browser,
     cookies,
@@ -103,6 +103,6 @@ const scrapeAssignments = async (browser, cookies, url, dir) => {
     getAssignments,
     scrapeAssignment
   );
-};
+}
 
 export default scrapeAssignments;

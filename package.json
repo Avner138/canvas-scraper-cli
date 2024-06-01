@@ -17,6 +17,7 @@
   "dependencies": {
     "commander": "^11.1.0",
     "dotenv-flow": "^4.1.0",
+    "inquirer": "^9.2.23",
     "p-limit": "^5.0.0",
     "puppeteer": "^21.9.0"
   }

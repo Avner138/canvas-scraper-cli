@@ -15,7 +15,8 @@ const exported = {
   async newPage(browser, cookies, url) {
     const page = await browser.newPage();
     await page.setCookie(...cookies);
-    await page.goto(url);
+    const response = await page.goto(url);
+    page.status = response.status();
     return page;
   },
 
@@ -122,7 +123,7 @@ const exported = {
    * @param {Number} indent number of indents to use
    * @param {any} additional additional information to print (e.g error stack trace)
    */
-  async print(type, name, message, indent = 0, additional = null) {
+  print(type, name, message, indent = 0, additional = null) {
     console.log(`[${type}]${"  ".repeat(indent)} ${name} | ${message}`);
     if (additional) console.log(additional);
   },
@@ -221,6 +222,16 @@ const exported = {
     console.log(`=== SCRAPING ${typeU}S ===`);
     fs.mkdirSync(`${dir}/${typeU}S`);
     const page = await this.newPage(browser, cookies, `${url}/${type}s`);
+    if (page.status !== 200) {
+      this.print(
+        "ERROR",
+        `${typeU}S`,
+        `Could not load ${type}s page. Skipping...`,
+        0,
+        http.STATUS_CODES[page.status]
+      );
+      return;
+    }
 
     if (type === "assignment") {
       let submissionsURL = `${url.replace(
