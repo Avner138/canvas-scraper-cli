@@ -14,14 +14,12 @@ The easiest way to do this is by logging into Canvas in your browser and using a
 
 ### Using Pre-Compiled Release
 
-First, download the latest version from the [Releases](https://github.com/xxmistacruzxx/canvas-scraper/releases) page and extract the ZIP file.
+First, download the latest version from the [Releases](https://github.com/xxmistacruzxx/canvas-scraper/releases) page and extract the ZIP file. Inside the folder, you'll find three (3) different executables, with each being for a different operating system.
 
-Inside the extracted folder, navigate to the "dist" folder and copy the executable for your respective operating system into the main directory of the extracted folder.
-
-To use the executable, simply navigate to the directory in a shell and call the executable.
+To use the executable, you can either open it using your file explorer (which will open a wizard to guide you through the different arguments and flags) or simply navigate to the directory in a shell and call the executable.
 
 e.g Windows<br/>
-`./canvas-scraper.exe`
+`./canvas-scraper.exe [options] <url>`
 
 ### Using Source Code
 
@@ -33,11 +31,7 @@ Once installed, download the project dependencies using...
 
 After, you can simply run the entry file directly...
 
-`node index.js ...`
-
-or via the NPM script...
-
-`npm run start ...`
+`node index.js [options] <url>`
 
 ## Usage
 
@@ -75,7 +69,7 @@ You must use the 'a' and/or 'm' flags, otherwise no data will be scraped.
     - MODULE NAME
       - .MODULE.pdf
       - {Embedded Files}
-  - MODULES.pdf
+  - .MODULES.pdf
 - .HOMEPAGE.pdf
 
 ## Video Tutorial

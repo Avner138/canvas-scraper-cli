@@ -6,10 +6,10 @@
   "type": "module",
   "scripts": {
     "dev": "node index.js",
-    "start": "./dist/canvas-scraper.exe",
-    "build-win": "nexe -t win-x64-latest index.js -o dist/canvas-scraper-win --build",
-    "build-linux": "nexe -t linux-x64-latest index.js -o dist/canvas-scraper-linux --build",
-    "build-mac": "nexe -t mac-x64-latest index.js -o dist/canvas-scraper-mac --build",
+    "start": "./canvas-scraper.exe",
+    "build-win": "nexe -t win-x64-latest index.js -o canvas-scraper-win --build",
+    "build-linux": "nexe -t linux-x64-latest index.js -o canvas-scraper-linux --build",
+    "build-mac": "nexe -t mac-x64-latest index.js -o canvas-scraper-mac --build",
     "build": "npm run build-win && npm run build-linux && npm run build-mac"
   },
   "author": "",
