@@ -3,9 +3,12 @@ import { Command } from "commander";
 import puppeteer from "puppeteer";
 import http from "http";
 import inquirer from "inquirer";
+import inquirerFileTreeSelection from "inquirer-file-tree-selection-prompt";
 
 import helpers from "./scrapers/helpers.js";
 import scrapers from "./scrapers/index.js";
+
+inquirer.registerPrompt("file-tree-selection", inquirerFileTreeSelection);
 
 function parseUrl(url) {
   const regex = /^https:\/\/([^/]+)\/courses\/([^/]+)(\/.*)?$/;
@@ -62,18 +65,24 @@ const flagDef = [
     description: "output directory name",
   },
   {
-    type: "input",
+    type: "file-tree-selection",
     name: "cookies",
-    message: "Please enter the path to the cookies file:",
+    message:
+      "Please enter the path to the cookies file (navigate using arrow keys):",
     default: "cookies.json",
     flags: "-c, --cookies <path>",
     description: "path to cookies file",
+    onlyShowValid: true,
+    validate: (input) => {
+      if (input.endsWith(".json")) return true;
+      return "Invalid file format. Please select a JSON file.";
+    },
   },
   {
     type: "confirm",
     name: "a",
     message: "Do you want to scrape assignments?",
-    default: false,
+    default: true,
     flags: "-a",
     description: "scrape assignments",
   },
@@ -81,7 +90,7 @@ const flagDef = [
     type: "confirm",
     name: "m",
     message: "Do you want to scrape modules?",
-    default: false,
+    default: true,
     flags: "-m",
     description: "scrape modules",
   },
@@ -147,7 +156,7 @@ program.action(async (url, options) => {
   if (toScrape.m) await scrapers.scrapeModules(browser, cookies, url, dir);
 
   browser.close();
-  console.log(`*** SCRAPING ${url} COMPLETE ***`);
+  console.log(`*** FINISHED SCRAPING ${url} ***`);
 });
 
 program.parse();
