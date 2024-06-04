@@ -3,12 +3,9 @@ import { Command } from "commander";
 import puppeteer from "puppeteer";
 import http from "http";
 import inquirer from "inquirer";
-import inquirerFileTreeSelection from "inquirer-file-tree-selection-prompt";
 
 import helpers from "./scrapers/helpers.js";
 import scrapers from "./scrapers/index.js";
-
-inquirer.registerPrompt("file-tree-selection", inquirerFileTreeSelection);
 
 function parseUrl(url) {
   const regex = /^https:\/\/([^/]+)\/courses\/([^/]+)(\/.*)?$/;
@@ -65,17 +62,19 @@ const flagDef = [
     description: "output directory name",
   },
   {
-    type: "file-tree-selection",
+    type: "input",
     name: "cookies",
-    message:
-      "Please enter the path to the cookies file (navigate using arrow keys):",
+    message: "Please enter the path to the cookies file:",
     default: "cookies.json",
     flags: "-c, --cookies <path>",
     description: "path to cookies file",
     onlyShowValid: true,
     validate: (input) => {
-      if (input.endsWith(".json")) return true;
-      return "Invalid file format. Please select a JSON file.";
+      if (!fs.existsSync(input))
+        return "File does not exist. Please enter a valid path.";
+      if (!input.toLowerCase().endsWith("json"))
+        return "Invalid file format. Please enter a path to a JSON file.";
+      return true;
     },
   },
   {
