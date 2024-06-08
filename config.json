@@ -1,0 +1,19 @@
+{
+  "selectors": {
+    "assignment": {
+      "sectionSelector": "#content .ig-list .item-group-condensed",
+      "headerSelector": ".ig-header .ig-header-title button",
+      "itemSelector": "#content .ig-row a"
+    },
+    "module": {
+      "sectionSelector": "#content .ig-list .item-group-condensed",
+      "headerSelector": ".ig-header .name",
+      "itemSelector": "#content .ig-row .ig-info .item_link"
+    },
+    "quiz": {
+      "sectionSelector": "#content .item-group-container .item-group-condensed",
+      "headerSelector": ".ig-header .ig-header-title button",
+      "itemSelector": ".ig-row a"
+    }
+  }
+}

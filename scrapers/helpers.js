@@ -1,6 +1,7 @@
 import fs from "fs";
 import fetch from "node-fetch";
 import path from "path";
+import http from "http";
 import { Browser, Page } from "puppeteer";
 import { Readable } from "stream";
 
@@ -140,6 +141,21 @@ const exported = {
     await textStream.pipe(fileStream);
   },
 
+  types: {
+    assignment: {
+      s: "assignment",
+      p: "assignments",
+    },
+    module: {
+      s: "module",
+      p: "modules",
+    },
+    quiz: {
+      s: "quiz",
+      p: "quizzes",
+    },
+  },
+
   /**
    * Gets all sections from a page
    * @param {Page} page page to scrape from
@@ -148,12 +164,7 @@ const exported = {
    * @param {string} itemSelector selector for items in sections
    * @returns {Promise<Array<object>>} array of sections
    */
-  async getSections(
-    page,
-    sectionSelector = "#content .ig-list .item-group-condensed",
-    headerSelector = ".ig-header .name",
-    itemSelector = "#content .ig-row .ig-info .item_link"
-  ) {
+  async getSections(page, sectionSelector, headerSelector, itemSelector) {
     let sections = await page.evaluate(
       (sectionSelector, headerSelector, itemSelector) => {
         // get all sections
@@ -218,15 +229,18 @@ const exported = {
     gettingFunction,
     scrapingFunction
   ) {
-    const typeU = type.toUpperCase();
-    console.log(`=== SCRAPING ${typeU}S ===`);
-    fs.mkdirSync(`${dir}/${typeU}S`);
-    const page = await this.newPage(browser, cookies, `${url}/${type}s`);
+    console.log(`=== SCRAPING ${this.types[type].p.toUpperCase()} ===`);
+    fs.mkdirSync(`${dir}/${this.types[type].p.toUpperCase()}`);
+    const page = await this.newPage(
+      browser,
+      cookies,
+      `${url}/${this.types[type].p}`
+    );
     if (page.status !== 200) {
       this.print(
         "ERROR",
-        `${typeU}S`,
-        `Could not load ${type}s page. Skipping...`,
+        this.types[type].p.toUpperCase(),
+        `Could not load ${this.types[type].p} page. Skipping...`,
         0,
         http.STATUS_CODES[page.status]
       );
@@ -248,7 +262,9 @@ const exported = {
     }
 
     await page.pdf({
-      path: `${dir}/${typeU}S/.${typeU}S.pdf`,
+      path: `${dir}/${this.types[type].p.toUpperCase()}/.${this.types[
+        type
+      ].p.toUpperCase()}.pdf`,
       format: "Letter",
     });
 
@@ -260,11 +276,13 @@ const exported = {
         let pLinks = [];
         this.print(
           "NOTE",
-          `${typeU} SECTION '${section.name}'`,
+          `${this.types[type].s.toUpperCase()} SECTION '${section.name}'`,
           `STARTING SCRAPING`,
           0
         );
-        fs.mkdirSync(`${dir}/${typeU}S/${section.name}`);
+        fs.mkdirSync(
+          `${dir}/${this.types[type].p.toUpperCase()}/${section.name}`
+        );
         for (const link of section.links) {
           try {
             let pDownloads = await scrapingFunction(
@@ -279,7 +297,7 @@ const exported = {
           } catch (e) {
             this.print(
               "ERROR",
-              `${typeU} '${link.name}'`,
+              `${this.types[type].s.toUpperCase()} '${link.name}'`,
               `COULD NOT SCRAPE`,
               1,
               e
@@ -291,7 +309,7 @@ const exported = {
       } catch (e) {
         this.print(
           "ERROR",
-          `${typeU} SECTION '${section.name}'`,
+          `${this.types[type].s.toUpperCase()} SECTION '${section.name}'`,
           `COULD NOT SCRAPE`,
           0,
           e
@@ -300,9 +318,15 @@ const exported = {
     }
 
     try {
-      this.printSummary(sections, pSections);
+      this.printSummary(sections, pSections, type);
     } catch (e) {
-      this.print("ERROR", `${typeU}S SUMMARY`, `COULD NOT PRINT`, 0, e);
+      this.print(
+        "ERROR",
+        `${this.types[type].p.toUpperCase()} SUMMARY`,
+        `COULD NOT PRINT`,
+        0,
+        e
+      );
     }
 
     page.close();
@@ -312,16 +336,23 @@ const exported = {
    * prints a summary of scraping results by section
    * @param {Array<Object>} sections
    * @param {Array<Object>} pSections
+   * @param {string} type
    */
-  printSummary(sections, pSections) {
-    console.log("--- SCRAPING SUMMARY ---");
-    console.log(`[NOTE] TOTAL SECTIONS: ${sections.length}`);
+  printSummary(sections, pSections, type) {
+    console.log(`--- ${this.types[type].p.toUpperCase()} SCRAPING SUMMARY ---`);
+    console.log(
+      `[NOTE] TOTAL ${this.types[type].s.toUpperCase()} SECTIONS: ${
+        sections.length
+      }`
+    );
     let itemCount = sections
       .map((section) => {
         return section.links.length;
       })
       .reduce((a, b) => a + b, 0);
-    console.log(`[NOTE] TOTAL ITEMS: ${itemCount}`);
+    console.log(
+      `[NOTE] TOTAL ${this.types[type].p.toUpperCase()}: ${itemCount}`
+    );
 
     if (pSections.length > 0) {
       console.log("[WARNING] Some files failed to download...");

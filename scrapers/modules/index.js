@@ -35,7 +35,13 @@ async function scrapeModule(browser, cookies, dir, sectionName, module) {
 }
 
 async function getModules(page) {
-  return await helpers.getSections(page);
+  const selectors = JSON.parse(process.env.config).selectors.module;
+  return await helpers.getSections(
+    page,
+    selectors.sectionSelector,
+    selectors.headerSelector,
+    selectors.itemSelector
+  );
 }
 
 async function scrapeModules(browser, cookies, url, dir) {

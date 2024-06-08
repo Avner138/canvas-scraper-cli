@@ -23,17 +23,11 @@ function parseUrl(url) {
   return `https://${match[1]}/courses/${match[2]}`;
 }
 
-function readCookies(path) {
+function readJSON(path, varName) {
   try {
     return JSON.parse(fs.readFileSync(path));
   } catch (e) {
-    helpers.print(
-      "ERROR",
-      "COOKIES",
-      "Could not read cookies. Exiting...",
-      0,
-      e
-    );
+    helpers.print("ERROR", varName, "Could not read cookies. Exiting...", 0, e);
     process.exit(1);
   }
 }
@@ -81,7 +75,7 @@ const flagDef = [
     type: "confirm",
     name: "a",
     message: "Do you want to scrape assignments?",
-    default: true,
+    default: false,
     flags: "-a",
     description: "scrape assignments",
   },
@@ -89,9 +83,17 @@ const flagDef = [
     type: "confirm",
     name: "m",
     message: "Do you want to scrape modules?",
-    default: true,
+    default: false,
     flags: "-m",
     description: "scrape modules",
+  },
+  {
+    type: "confirm",
+    name: "q",
+    message: "Do you want to scrape quizzes?",
+    default: false,
+    flags: "-q",
+    description: "scrape quizzes",
   },
 ];
 
@@ -120,7 +122,8 @@ program.action(async (url, options) => {
   // url parsing
   url = parseUrl(url);
   // read cookies
-  const cookies = readCookies(options.cookies);
+  const cookies = readJSON(options.cookies, "cookies");
+  process.env.config = JSON.stringify(readJSON("config.json", "config"));
 
   console.log(`*** SCRAPING COURSE FROM ${url} ***`);
   console.log(`FLAGS: ${JSON.stringify(options)}`);
@@ -146,13 +149,14 @@ program.action(async (url, options) => {
   await page.pdf({ path: `${dir}/.HOMEPAGE.pdf`, format: "Letter" });
   page.close();
 
-  const toScrape = { a: options.a, m: options.m };
+  const toScrape = { a: options.a, m: options.m, q: options.q };
   if (Object.values(toScrape).every((v) => !v)) {
     helpers.print("NOTE", "FLAGS", "No flags set. Scraping all...", 0);
     for (const key in toScrape) toScrape[key] = true;
   }
   if (toScrape.a) await scrapers.scrapeAssignments(browser, cookies, url, dir);
   if (toScrape.m) await scrapers.scrapeModules(browser, cookies, url, dir);
+  if (toScrape.q) await scrapers.scrapeQuizzes(browser, cookies, url, dir);
 
   browser.close();
   console.log(`*** FINISHED SCRAPING ${url} ***`);

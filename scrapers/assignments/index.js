@@ -85,11 +85,12 @@ async function scrapeAssignment(
 }
 
 async function getAssignments(page) {
+  const selectors = JSON.parse(process.env.config).selectors.assignment;
   return await helpers.getSections(
     page,
-    "#content .ig-list .item-group-condensed",
-    ".ig-header .ig-header-title button",
-    "#content .ig-row a"
+    selectors.sectionSelector,
+    selectors.headerSelector,
+    selectors.itemSelector
   );
 }
 
