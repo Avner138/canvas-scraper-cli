@@ -173,6 +173,7 @@ const exported = {
     // A non-2xx response never carries the file; bail before writing anything
     // (e.g. an expired session yields a 401/403, or a broken link a 404).
     if (!response.ok) {
+      this.discardBody(response);
       report.recordFailure(url, this.describeHttpFailure(url, response.status));
       return false;
     }
@@ -322,12 +323,16 @@ const exported = {
       } catch (e) {
         break;
       }
-      if (!response.ok) break;
+      if (!response.ok) {
+        this.discardBody(response);
+        break;
+      }
 
       let pageItems;
       try {
         pageItems = await response.json();
       } catch (e) {
+        this.discardBody(response);
         break;
       }
       if (Array.isArray(pageItems)) {
@@ -403,7 +408,10 @@ const exported = {
       const response = await fetch(`${domain}/api/v1/courses/${courseId}`, {
         headers: { Cookie: cookieHeader, Accept: "application/json" },
       });
-      if (!response.ok) return null;
+      if (!response.ok) {
+        this.discardBody(response);
+        return null;
+      }
       const course = await response.json();
       const name = course && typeof course.name === "string" ? course.name.trim() : "";
       return name || null;
@@ -719,7 +727,10 @@ const exported = {
     } catch (e) {
       return false;
     }
-    if (!response.ok) return false;
+    if (!response.ok) {
+      this.discardBody(response);
+      return false;
+    }
     return this.writeResponseToFile(url, response, dir, backupName);
   },
 
@@ -805,6 +816,7 @@ const exported = {
     // sends full headers and runs the page's scripts. Fall back to archiving it
     // as a PDF rather than giving up.
     if (!response || !response.ok) {
+      this.discardBody(response);
       return this.archiveWebpageAsPdf(browser, url, dir, `external_${index}`);
     }
 
@@ -933,6 +945,25 @@ const exported = {
    * @param {Array<object>} [cookies] cookies to authenticate with
    * @returns {Promise<boolean>} whether the video appears accessible
    */
+  /**
+   * Drains and releases a node-fetch response body.
+   *
+   * node-fetch holds the underlying socket open until the body is consumed or
+   * destroyed. The success paths here all read the body (.json(), .pipe(),
+   * .destroy()), but every non-ok path used to just return — so a course with
+   * many blocked items (403s, paywalls) finished with a handful of live sockets
+   * still pinning the event loop, and the CLI never exited. Call this before
+   * returning from any path that will not read the body.
+   * @param {object} response a node-fetch response
+   */
+  discardBody(response) {
+    try {
+      response?.body?.destroy();
+    } catch (e) {
+      /* a body that's already gone is fine */
+    }
+  },
+
   /**
    * Releases a spawned child's stdio handles.
    *
@@ -2031,6 +2062,8 @@ const exported = {
       if (res.ok) {
         const course = await res.json();
         view = course.default_view || null;
+      } else {
+        this.discardBody(res);
       }
     } catch (e) {
       // Non-fatal: without it the guard just treats any redirect as a
