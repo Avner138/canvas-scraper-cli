@@ -938,14 +938,6 @@ const exported = {
   },
 
   /**
-   * Probes a video for accessibility with yt-dlp's --simulate (used by --dry-run):
-   * resolves the video/playlist and its formats without downloading any media.
-   * Records the result via `report` and returns whether it looks accessible.
-   * @param {string} url video URL (viewer/embed/watch/folder page)
-   * @param {Array<object>} [cookies] cookies to authenticate with
-   * @returns {Promise<boolean>} whether the video appears accessible
-   */
-  /**
    * Drains and releases a node-fetch response body.
    *
    * node-fetch holds the underlying socket open until the body is consumed or
@@ -987,6 +979,14 @@ const exported = {
     }
   },
 
+  /**
+   * Probes a video for accessibility with yt-dlp's --simulate (used by --dry-run):
+   * resolves the video/playlist and its formats without downloading any media.
+   * Records the result via `report` and returns whether it looks accessible.
+   * @param {string} url video URL (viewer/embed/watch/folder page)
+   * @param {Array<object>} [cookies] cookies to authenticate with
+   * @returns {Promise<boolean>} whether the video appears accessible
+   */
   async probeVideo(url, cookies) {
     const args = ["--simulate", "--no-warnings", "--quiet"];
     if (this.videoUrlKind(url) === "single") args.push("--no-playlist");
