@@ -357,10 +357,44 @@ program.action(async (url, options) => {
     }
 
     await runScrape(url, options);
+
+    // runScrape has returned, which means the browser is closed and every
+    // report is on disk — the run is complete and nothing further is owed.
+    //
+    // Puppeteer and node-fetch both tend to leave a stray handle behind (a
+    // socket the peer never finished closing, a pipe from a spawn that failed),
+    // and one open handle is enough to keep the event loop alive forever. The
+    // CLI would then sit at 0% CPU with its work finished, which in cron or CI
+    // hangs the job until it times out. Known leaks are fixed at the source;
+    // this makes the exit deterministic regardless of what else lingers.
+    //
+    // Exiting from the stdout drain callback rather than calling process.exit()
+    // outright: stdout is asynchronous when it's a pipe, so a bare exit here
+    // could truncate the final lines of the report.
+    await exitWhenFlushed(0);
   } catch (e) {
     helpers.print("ERROR", "SCRAPE", e.message || String(e), 0);
     process.exit(1);
   }
 });
+
+/**
+ * Exits once stdout has drained, so no output is truncated on the way out.
+ * Falls back to exiting anyway if the drain never reports back.
+ * @param {number} code process exit code
+ */
+function exitWhenFlushed(code) {
+  return new Promise(() => {
+    let done = false;
+    const bail = () => {
+      if (done) return;
+      done = true;
+      process.exit(code);
+    };
+    // If stdout is wedged, don't hang on the very thing we're fixing.
+    setTimeout(bail, 2000).unref();
+    process.stdout.write("", bail);
+  });
+}
 
 program.parse();
