@@ -32,6 +32,21 @@ import { findChrome } from "./chrome.js";
  *   "Target.createTarget timed out" / "increase the 'protocolTimeout'" error.
  * @returns {Promise<import("puppeteer").Browser>}
  */
+/**
+ * A one-line gist of an error, short enough to embed in a log line.
+ *
+ * Puppeteer's "could not find browser" error runs to several lines of install
+ * advice, and its first line ends mid-sentence. Splitting on sentence
+ * punctuation doesn't help either — the version number ("ver. 154.0.8037.57")
+ * has periods in it. So: first line, capped.
+ * @param {Error} err
+ * @returns {string}
+ */
+function summarizeError(err) {
+  const line = ((err && err.message) || String(err || "")).trim().split("\n")[0].trim();
+  return line.length > 96 ? `${line.slice(0, 95)}…` : line;
+}
+
 export async function launchBrowser(opts = {}) {
   const { headless = true, userDataDir, protocolTimeout = 300000 } = opts;
   const base = { headless, protocolTimeout };
@@ -50,7 +65,7 @@ export async function launchBrowser(opts = {}) {
       helpers.print(
         "NOTE",
         "BROWSER",
-        `Puppeteer's bundled browser is unavailable (${bundledErr.message.split("\n")[0]}); falling back to the system Chrome at ${chromePath}.`,
+        `Puppeteer's bundled browser is unavailable (${summarizeError(bundledErr)}); falling back to the system Chrome at ${chromePath}.`,
         0
       );
       return await puppeteer.launch({ ...base, executablePath: chromePath });
