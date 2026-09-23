@@ -31,9 +31,14 @@ await build({
   format: "esm",
   target: "node24",
   outfile: "dist/app.mjs",
-  // puppeteer spawns Chrome and does its own dynamic requires; let pkg snapshot
-  // it from node_modules (it's CJS and packages cleanly) instead of bundling.
-  external: ["puppeteer"],
+  // Puppeteer used to be left external for pkg to snapshot from node_modules,
+  // on the grounds that it was CJS and packaged cleanly. Since v22 it is ESM
+  // ("type": "module"), and pkg cannot resolve its internal ESM graph — the
+  // packaged binary died at startup with ERR_MODULE_NOT_FOUND on
+  // puppeteer-core/lib/puppeteer/api/Browser.js, before any of our code ran.
+  // Bundling it here sidesteps pkg's ESM handling entirely, the same reason
+  // ink and yoga-layout are bundled rather than snapshotted.
+  external: [],
   plugins: [stubDevtools],
   // Bundled CommonJS deps (commander, inquirer, …) call require() for builtins
   // like "events". An ESM bundle has no require, so provide a real one.

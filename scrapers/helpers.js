@@ -4,6 +4,11 @@ import path from "path";
 import os from "os";
 import http from "http";
 import { spawn } from "child_process";
+
+// Hangs an abort hook on a response so discardBody() can release its socket
+// without reading the body. A symbol so it cannot collide with node-fetch's
+// own properties.
+const CANCEL_REQUEST = Symbol("cancelRequest");
 import { Browser, Page } from "puppeteer";
 import { Readable } from "stream";
 
@@ -160,7 +165,7 @@ const exported = {
       }
     }
 
-    const response = await fetch(url, {
+    const response = await this.fetchTracked(url, {
       method: "GET",
       credentials: "include",
       headers: {
@@ -173,6 +178,7 @@ const exported = {
     // A non-2xx response never carries the file; bail before writing anything
     // (e.g. an expired session yields a 401/403, or a broken link a 404).
     if (!response.ok) {
+      this.discardBody(response);
       report.recordFailure(url, this.describeHttpFailure(url, response.status));
       return false;
     }
@@ -316,18 +322,22 @@ const exported = {
     while (url && guard++ < 50) {
       let response;
       try {
-        response = await fetch(url, {
+        response = await this.fetchTracked(url, {
           headers: { Cookie: cookieHeader, Accept: "application/json" },
         });
       } catch (e) {
         break;
       }
-      if (!response.ok) break;
+      if (!response.ok) {
+        this.discardBody(response);
+        break;
+      }
 
       let pageItems;
       try {
         pageItems = await response.json();
       } catch (e) {
+        this.discardBody(response);
         break;
       }
       if (Array.isArray(pageItems)) {
@@ -400,10 +410,13 @@ const exported = {
       .map((cookie) => `${cookie.name}=${cookie.value}`)
       .join("; ");
     try {
-      const response = await fetch(`${domain}/api/v1/courses/${courseId}`, {
+      const response = await this.fetchTracked(`${domain}/api/v1/courses/${courseId}`, {
         headers: { Cookie: cookieHeader, Accept: "application/json" },
       });
-      if (!response.ok) return null;
+      if (!response.ok) {
+        this.discardBody(response);
+        return null;
+      }
       const course = await response.json();
       const name = course && typeof course.name === "string" ? course.name.trim() : "";
       return name || null;
@@ -715,11 +728,14 @@ const exported = {
 
     let response;
     try {
-      response = await fetch(url, { method: "GET", redirect: "follow" });
+      response = await this.fetchTracked(url, { method: "GET", redirect: "follow" });
     } catch (e) {
       return false;
     }
-    if (!response.ok) return false;
+    if (!response.ok) {
+      this.discardBody(response);
+      return false;
+    }
     return this.writeResponseToFile(url, response, dir, backupName);
   },
 
@@ -791,7 +807,7 @@ const exported = {
   async downloadExternalResource(browser, url, dir, index) {
     let response;
     try {
-      response = await fetch(url, {
+      response = await this.fetchTracked(url, {
         method: "GET",
         redirect: "follow",
         headers: { "User-Agent": BROWSER_UA },
@@ -805,6 +821,7 @@ const exported = {
     // sends full headers and runs the page's scripts. Fall back to archiving it
     // as a PDF rather than giving up.
     if (!response || !response.ok) {
+      this.discardBody(response);
       return this.archiveWebpageAsPdf(browser, url, dir, `external_${index}`);
     }
 
@@ -922,6 +939,48 @@ const exported = {
       return false;
     } finally {
       if (page) await page.close().catch(() => {});
+    }
+  },
+
+  /**
+   * Performs a fetch whose connection can later be released without reading the
+   * body, by handing the response an abort hook that `discardBody` can find.
+   *
+   * Use this for every Node-side fetch. (The fetch inside the HBSP
+   * page.evaluate() runs in the browser, not here, and is not affected.)
+   * @param {string} url
+   * @param {object} [init] node-fetch init; a `signal` here is overridden
+   * @returns {Promise<object>} a node-fetch response
+   */
+  async fetchTracked(url, init = {}) {
+    const controller = new AbortController();
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    response[CANCEL_REQUEST] = () => controller.abort();
+    return response;
+  },
+
+  /**
+   * Releases the connection behind a response we are not going to read.
+   *
+   * Destroying `response.body` is not enough: in node-fetch 2.x the body is a
+   * downstream stream produced by piping the real HTTP response, so destroying
+   * it leaves the upstream socket open. Against a local server returning a
+   * streaming 403, `body.destroy()` left the server-side socket established;
+   * aborting the request closed it. So abort first — that is the part that
+   * bounds cleanup even for an endless response — then destroy the body for
+   * the case where the response came from somewhere without an abort hook.
+   * @param {object} response a node-fetch response
+   */
+  discardBody(response) {
+    try {
+      response?.[CANCEL_REQUEST]?.();
+    } catch (e) {
+      /* aborting an already-finished request is a no-op */
+    }
+    try {
+      response?.body?.destroy();
+    } catch (e) {
+      /* a body that's already gone is fine */
     }
   },
 
@@ -1997,12 +2056,14 @@ const exported = {
       const cookieHeader = cookies
         .map((cookie) => `${cookie.name}=${cookie.value}`)
         .join("; ");
-      const res = await fetch(apiUrl, {
+      const res = await this.fetchTracked(apiUrl, {
         headers: { Cookie: cookieHeader, Accept: "application/json" },
       });
       if (res.ok) {
         const course = await res.json();
         view = course.default_view || null;
+      } else {
+        this.discardBody(res);
       }
     } catch (e) {
       // Non-fatal: without it the guard just treats any redirect as a
@@ -2273,14 +2334,24 @@ const exported = {
       }
     }
 
-    await this.capturePdf(page, {
-      path: `${dir}/${this.types[type].p.toUpperCase()}/${this.types[
-        type
-      ].p.toUpperCase()}.pdf`,
-      format: "Letter",
-    });
+    // The section loops below guard each item, and printSummary is wrapped, so
+    // these two calls were the only path that could throw straight past the
+    // page.close() at the end of this function and strand a CDP target. Close
+    // it here and re-throw so the caller still sees the failure.
+    let sections;
+    try {
+      await this.capturePdf(page, {
+        path: `${dir}/${this.types[type].p.toUpperCase()}/${this.types[
+          type
+        ].p.toUpperCase()}.pdf`,
+        format: "Letter",
+      });
 
-    const sections = await gettingFunction(page);
+      sections = await gettingFunction(page);
+    } catch (e) {
+      await page.close().catch(() => {});
+      throw e;
+    }
 
     let pSections = [];
     for (const section of sections) {

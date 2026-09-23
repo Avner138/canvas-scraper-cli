@@ -475,6 +475,50 @@ function writeDryRunReport(dir) {
 }
 
 /**
+ * Writes every report this run is responsible for, exactly once.
+ *
+ * Puppeteer raises some protocol failures from inside its own event handlers
+ * (e.g. FrameManager.onAttachedToTarget discards the promise it starts), so a
+ * rejection can arrive on a chain nothing awaits. Node then kills the process
+ * without running any `finally`, and everything the run collected — which lives
+ * only in `report`'s in-memory arrays — is lost. So report writing is collected
+ * here and driven from two places: the normal `finally`, and the crash handlers
+ * installed for the duration of the run. The `flushed` latch keeps the second
+ * caller from re-writing (or double-echoing) what the first already wrote.
+ *
+ * @param {{done: boolean}} latch shared once-only guard for this run
+ * @param {string} dir the output directory
+ * @param {object} options the run's options (only `dryRun` is read)
+ */
+function flushReports(latch, dir, options) {
+  if (latch.done) return;
+
+  // The writers below don't create their parent directory, and an early throw
+  // (an invalid URL, a missing cookies file) happens before the run's own
+  // mkdirSync — so without this the dry-run report silently fails to write and
+  // only errors.csv survives, because its writer does create the directory.
+  try {
+    if (dir) fs.mkdirSync(dir, { recursive: true });
+  } catch (e) {
+    /* best-effort; the individual writers report their own failures */
+  }
+
+  // Latched only once a write has actually been attempted against a usable
+  // directory, so a failure here doesn't permanently suppress the finally's
+  // retry. The writers are individually try/caught and idempotent.
+  latch.done = true;
+
+  // Written first so that if it logs an ERROR, errors.csv below captures it.
+  if (options.dryRun) writeDryRunReport(dir);
+  // Always flush tracked errors to errors.csv (best-effort). This runs even
+  // when the scrape threw, so a failed run still leaves a record to resolve.
+  writeErrorsReport(dir);
+  // Likewise flush any rich failure diagnostics (e.g HBSP LTI launches that
+  // couldn't be downloaded) so the scraper can be updated to handle them.
+  writeDiagnosticsReport(dir);
+}
+
+/**
  * Runs a full scrape described by `options`, reporting progress through `hooks`.
  * @param {string} url the target Canvas URL
  * @param {object} options scrape options (a/m/q/v/s, all, output, cookies, t,
@@ -529,6 +573,47 @@ export async function runScrape(url, options, hooks = {}) {
   let browser;
   // Hoisted so the finally can always write errors.csv, even if the run throws.
   let dir = options.output;
+
+  // Guards against writing the reports twice when both a crash handler and the
+  // finally fire. Shared by reference so the handlers below see updates to it.
+  const flushLatch = { done: false };
+
+  // A fatal error that never reaches the try/catch below: an unowned promise
+  // rejection (see flushReports), a throw from a synchronous event listener, or
+  // the user pressing Ctrl-C on a long run. In every case the default behavior
+  // is to die immediately and discard the run's results, so save them first.
+  // These handlers are installed only for the duration of the run and removed
+  // in the finally, so importing this module never changes global behavior.
+  const onFatal = (label) => (err) => {
+    try {
+      helpers.print(
+        "ERROR",
+        "FATAL",
+        `${label} — writing what this run collected before exiting`,
+        0,
+        err
+      );
+      flushReports(flushLatch, dir, options);
+    } catch (e) {
+      /* never let the rescue path itself throw */
+    }
+    process.exit(1);
+  };
+  const onUnhandledRejection = onFatal("Unhandled promise rejection");
+  const onUncaughtException = onFatal("Uncaught exception");
+  const onInterrupt = () => {
+    try {
+      helpers.print("WARNING", "INTERRUPT", "Interrupted — saving progress...", 0);
+      flushReports(flushLatch, dir, options);
+    } catch (e) {
+      /* never let the rescue path itself throw */
+    }
+    process.exit(130); // 128 + SIGINT
+  };
+  process.on("unhandledRejection", onUnhandledRejection);
+  process.on("uncaughtException", onUncaughtException);
+  process.on("SIGINT", onInterrupt);
+
   try {
     const { domain, courseId } = parseTarget(url);
     const cookies = readCookies(options.cookies);
@@ -648,11 +733,15 @@ export async function runScrape(url, options, hooks = {}) {
     await browser.close();
     browser = null;
 
-    // A dry-run's whole output is the accessibility report; write it and skip the
-    // download report and the wiki/octarine reorganizers (there's nothing on disk
-    // to organize).
+    // A dry-run's whole output is the accessibility report. Write it *before
+    // announcing completion*, so a consumer that reads dry-run-report.csv from
+    // its `done` handler finds this run's file rather than a missing one (or a
+    // previous run's). The finally calls flushReports again as the crash-path
+    // backstop; the latch makes the second call a no-op.
+    // Skip the download report and the wiki/octarine reorganizers — there's
+    // nothing on disk to organize.
     if (options.dryRun) {
-      writeDryRunReport(dir);
+      flushReports(flushLatch, dir, options);
       const summary = { outputDir: dir, courseCount, single: !!courseId, dryRun: true };
       onProgress({ type: "done", summary });
       emit("*** DONE (dry run — nothing downloaded) ***");
@@ -717,12 +806,10 @@ export async function runScrape(url, options, hooks = {}) {
     return summary;
   } finally {
     if (browser) await browser.close().catch(() => {});
-    // Always flush tracked errors to errors.csv (best-effort). This runs even
-    // when the scrape threw, so a failed run still leaves a record to resolve.
-    writeErrorsReport(dir);
-    // Likewise flush any rich failure diagnostics (e.g HBSP LTI launches that
-    // couldn't be downloaded) so the scraper can be updated to handle them.
-    writeDiagnosticsReport(dir);
+    flushReports(flushLatch, dir, options);
+    process.off("unhandledRejection", onUnhandledRejection);
+    process.off("uncaughtException", onUncaughtException);
+    process.off("SIGINT", onInterrupt);
     helpers.setPrinter(prevPrinter);
     helpers.setProgressSink(prevProgressSink);
     helpers.setDryRun(prevDryRun);

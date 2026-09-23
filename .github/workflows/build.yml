@@ -92,6 +92,18 @@ jobs:
       - name: Build executable
         run: ${{ matrix.build }}
 
+      # The build succeeding says nothing about the binary starting. When
+      # Puppeteer went ESM in v22, pkg silently produced an executable that
+      # died at startup with ERR_MODULE_NOT_FOUND before any of our code ran,
+      # and CI published it to the rolling release anyway. --help exercises
+      # module resolution for the whole bundle and needs no network, browser
+      # or credentials.
+      - name: Smoke-test executable
+        shell: bash
+        run: |
+          "${{ matrix.artifact }}" --help > /dev/null
+          echo "started cleanly and exited $?"
+
       - name: Upload executable
         uses: actions/upload-artifact@v7
         with:
