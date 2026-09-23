@@ -933,6 +933,29 @@ const exported = {
    * @param {Array<object>} [cookies] cookies to authenticate with
    * @returns {Promise<boolean>} whether the video appears accessible
    */
+  /**
+   * Releases a spawned child's stdio handles.
+   *
+   * Node creates the stdin/stdout/stderr pipes before it knows whether the
+   * binary exists, so a spawn that fails with ENOENT still leaves three open
+   * pipe handles behind — and an open handle keeps the event loop alive, so the
+   * process finishes all its work and then never exits. That is exactly what
+   * happens on a machine without yt-dlp: every video probe takes the 'error'
+   * path and strands another set of pipes. Call this from every terminal
+   * handler ('error' and 'close') so the handles go away either way.
+   * @param {import("child_process").ChildProcess} child
+   */
+  releaseChildStdio(child) {
+    if (!child) return;
+    for (const stream of [child.stdin, child.stdout, child.stderr]) {
+      try {
+        stream?.destroy();
+      } catch (e) {
+        /* a stream that's already gone is fine */
+      }
+    }
+  },
+
   async probeVideo(url, cookies) {
     const args = ["--simulate", "--no-warnings", "--quiet"];
     if (this.videoUrlKind(url) === "single") args.push("--no-playlist");
@@ -951,6 +974,7 @@ const exported = {
       child.stdout && child.stdout.on("data", () => {});
       child.stderr && child.stderr.on("data", () => {});
       child.on("error", (e) => {
+        this.releaseChildStdio(child);
         if (e.code === "ENOENT" && !warnedMissingYtDlp) {
           warnedMissingYtDlp = true;
           this.print(
@@ -963,6 +987,7 @@ const exported = {
         resolve(false);
       });
       child.on("close", (code) => {
+        this.releaseChildStdio(child);
         const ok = code === 0;
         if (ok) report.recordAvailable(url, "video");
         resolve(ok);
@@ -1184,6 +1209,7 @@ const exported = {
 
       child.on("error", (e) => {
         stopSweep();
+        this.releaseChildStdio(child);
         if (e.code === "ENOENT") {
           if (!warnedMissingYtDlp) {
             warnedMissingYtDlp = true;
@@ -1202,6 +1228,7 @@ const exported = {
 
       child.on("close", async (code) => {
         stopSweep();
+        this.releaseChildStdio(child);
         this.emitProgress({
           scope: "video",
           phase: "done",
@@ -1349,6 +1376,7 @@ const exported = {
 
       const finish = () => {
         clearInterval(timer);
+        this.releaseChildStdio(child);
         this.emitProgress({
           scope: "transcribe",
           phase: "done",
