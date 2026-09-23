@@ -4,6 +4,11 @@ import path from "path";
 import os from "os";
 import http from "http";
 import { spawn } from "child_process";
+
+// Hangs an abort hook on a response so discardBody() can release its socket
+// without reading the body. A symbol so it cannot collide with node-fetch's
+// own properties.
+const CANCEL_REQUEST = Symbol("cancelRequest");
 import { Browser, Page } from "puppeteer";
 import { Readable } from "stream";
 
@@ -160,7 +165,7 @@ const exported = {
       }
     }
 
-    const response = await fetch(url, {
+    const response = await this.fetchTracked(url, {
       method: "GET",
       credentials: "include",
       headers: {
@@ -317,7 +322,7 @@ const exported = {
     while (url && guard++ < 50) {
       let response;
       try {
-        response = await fetch(url, {
+        response = await this.fetchTracked(url, {
           headers: { Cookie: cookieHeader, Accept: "application/json" },
         });
       } catch (e) {
@@ -405,7 +410,7 @@ const exported = {
       .map((cookie) => `${cookie.name}=${cookie.value}`)
       .join("; ");
     try {
-      const response = await fetch(`${domain}/api/v1/courses/${courseId}`, {
+      const response = await this.fetchTracked(`${domain}/api/v1/courses/${courseId}`, {
         headers: { Cookie: cookieHeader, Accept: "application/json" },
       });
       if (!response.ok) {
@@ -723,7 +728,7 @@ const exported = {
 
     let response;
     try {
-      response = await fetch(url, { method: "GET", redirect: "follow" });
+      response = await this.fetchTracked(url, { method: "GET", redirect: "follow" });
     } catch (e) {
       return false;
     }
@@ -802,7 +807,7 @@ const exported = {
   async downloadExternalResource(browser, url, dir, index) {
     let response;
     try {
-      response = await fetch(url, {
+      response = await this.fetchTracked(url, {
         method: "GET",
         redirect: "follow",
         headers: { "User-Agent": BROWSER_UA },
@@ -938,44 +943,44 @@ const exported = {
   },
 
   /**
-   * Drains and releases a node-fetch response body.
+   * Performs a fetch whose connection can later be released without reading the
+   * body, by handing the response an abort hook that `discardBody` can find.
    *
-   * node-fetch holds the underlying socket open until the body is consumed or
-   * destroyed. The success paths here all read the body (.json(), .pipe(),
-   * .destroy()), but every non-ok path used to just return — so a course with
-   * many blocked items (403s, paywalls) finished with a handful of live sockets
-   * still pinning the event loop, and the CLI never exited. Call this before
-   * returning from any path that will not read the body.
+   * Use this for every Node-side fetch. (The fetch inside the HBSP
+   * page.evaluate() runs in the browser, not here, and is not affected.)
+   * @param {string} url
+   * @param {object} [init] node-fetch init; a `signal` here is overridden
+   * @returns {Promise<object>} a node-fetch response
+   */
+  async fetchTracked(url, init = {}) {
+    const controller = new AbortController();
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    response[CANCEL_REQUEST] = () => controller.abort();
+    return response;
+  },
+
+  /**
+   * Releases the connection behind a response we are not going to read.
+   *
+   * Destroying `response.body` is not enough: in node-fetch 2.x the body is a
+   * downstream stream produced by piping the real HTTP response, so destroying
+   * it leaves the upstream socket open. Against a local server returning a
+   * streaming 403, `body.destroy()` left the server-side socket established;
+   * aborting the request closed it. So abort first — that is the part that
+   * bounds cleanup even for an endless response — then destroy the body for
+   * the case where the response came from somewhere without an abort hook.
    * @param {object} response a node-fetch response
    */
   discardBody(response) {
     try {
+      response?.[CANCEL_REQUEST]?.();
+    } catch (e) {
+      /* aborting an already-finished request is a no-op */
+    }
+    try {
       response?.body?.destroy();
     } catch (e) {
       /* a body that's already gone is fine */
-    }
-  },
-
-  /**
-   * Releases a spawned child's stdio handles.
-   *
-   * Node creates the stdin/stdout/stderr pipes before it knows whether the
-   * binary exists, so a spawn that fails with ENOENT still leaves three open
-   * pipe handles behind — and an open handle keeps the event loop alive, so the
-   * process finishes all its work and then never exits. That is exactly what
-   * happens on a machine without yt-dlp: every video probe takes the 'error'
-   * path and strands another set of pipes. Call this from every terminal
-   * handler ('error' and 'close') so the handles go away either way.
-   * @param {import("child_process").ChildProcess} child
-   */
-  releaseChildStdio(child) {
-    if (!child) return;
-    for (const stream of [child.stdin, child.stdout, child.stderr]) {
-      try {
-        stream?.destroy();
-      } catch (e) {
-        /* a stream that's already gone is fine */
-      }
     }
   },
 
@@ -1005,7 +1010,6 @@ const exported = {
       child.stdout && child.stdout.on("data", () => {});
       child.stderr && child.stderr.on("data", () => {});
       child.on("error", (e) => {
-        this.releaseChildStdio(child);
         if (e.code === "ENOENT" && !warnedMissingYtDlp) {
           warnedMissingYtDlp = true;
           this.print(
@@ -1018,7 +1022,6 @@ const exported = {
         resolve(false);
       });
       child.on("close", (code) => {
-        this.releaseChildStdio(child);
         const ok = code === 0;
         if (ok) report.recordAvailable(url, "video");
         resolve(ok);
@@ -1240,7 +1243,6 @@ const exported = {
 
       child.on("error", (e) => {
         stopSweep();
-        this.releaseChildStdio(child);
         if (e.code === "ENOENT") {
           if (!warnedMissingYtDlp) {
             warnedMissingYtDlp = true;
@@ -1259,7 +1261,6 @@ const exported = {
 
       child.on("close", async (code) => {
         stopSweep();
-        this.releaseChildStdio(child);
         this.emitProgress({
           scope: "video",
           phase: "done",
@@ -1407,7 +1408,6 @@ const exported = {
 
       const finish = () => {
         clearInterval(timer);
-        this.releaseChildStdio(child);
         this.emitProgress({
           scope: "transcribe",
           phase: "done",
@@ -2056,7 +2056,7 @@ const exported = {
       const cookieHeader = cookies
         .map((cookie) => `${cookie.name}=${cookie.value}`)
         .join("; ");
-      const res = await fetch(apiUrl, {
+      const res = await this.fetchTracked(apiUrl, {
         headers: { Cookie: cookieHeader, Accept: "application/json" },
       });
       if (res.ok) {

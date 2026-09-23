@@ -492,7 +492,22 @@ function writeDryRunReport(dir) {
  */
 function flushReports(latch, dir, options) {
   if (latch.done) return;
+
+  // The writers below don't create their parent directory, and an early throw
+  // (an invalid URL, a missing cookies file) happens before the run's own
+  // mkdirSync — so without this the dry-run report silently fails to write and
+  // only errors.csv survives, because its writer does create the directory.
+  try {
+    if (dir) fs.mkdirSync(dir, { recursive: true });
+  } catch (e) {
+    /* best-effort; the individual writers report their own failures */
+  }
+
+  // Latched only once a write has actually been attempted against a usable
+  // directory, so a failure here doesn't permanently suppress the finally's
+  // retry. The writers are individually try/caught and idempotent.
   latch.done = true;
+
   // Written first so that if it logs an ERROR, errors.csv below captures it.
   if (options.dryRun) writeDryRunReport(dir);
   // Always flush tracked errors to errors.csv (best-effort). This runs even
@@ -718,10 +733,15 @@ export async function runScrape(url, options, hooks = {}) {
     await browser.close();
     browser = null;
 
-    // A dry-run's whole output is the accessibility report; the finally writes
-    // it (so a crash can't lose it). Skip the download report and the
-    // wiki/octarine reorganizers — there's nothing on disk to organize.
+    // A dry-run's whole output is the accessibility report. Write it *before
+    // announcing completion*, so a consumer that reads dry-run-report.csv from
+    // its `done` handler finds this run's file rather than a missing one (or a
+    // previous run's). The finally calls flushReports again as the crash-path
+    // backstop; the latch makes the second call a no-op.
+    // Skip the download report and the wiki/octarine reorganizers — there's
+    // nothing on disk to organize.
     if (options.dryRun) {
+      flushReports(flushLatch, dir, options);
       const summary = { outputDir: dir, courseCount, single: !!courseId, dryRun: true };
       onProgress({ type: "done", summary });
       emit("*** DONE (dry run — nothing downloaded) ***");

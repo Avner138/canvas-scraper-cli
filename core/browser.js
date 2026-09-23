@@ -52,6 +52,25 @@ export async function launchBrowser(opts = {}) {
   const base = { headless, protocolTimeout };
   if (userDataDir) base.userDataDir = userDataDir;
 
+  // An explicit override wins over everything. Puppeteer honors
+  // PUPPETEER_EXECUTABLE_PATH itself, but CHROME_PATH is ours, and before this
+  // preference was flipped findChrome() ran first so both were respected.
+  // Checking only after the default launch *succeeds* would silently ignore a
+  // browser the user deliberately chose.
+  const override = process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROME_PATH;
+  if (override) {
+    const resolved = findChrome();
+    if (resolved) {
+      return await puppeteer.launch({ ...base, executablePath: resolved });
+    }
+    helpers.print(
+      "WARNING",
+      "BROWSER",
+      `CHROME_PATH/PUPPETEER_EXECUTABLE_PATH is set to "${override}" but no browser exists there; ignoring it.`,
+      0
+    );
+  }
+
   // The protocol-matched browser Puppeteer installed for itself.
   try {
     return await puppeteer.launch(base);
