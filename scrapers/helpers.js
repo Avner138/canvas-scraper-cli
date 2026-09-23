@@ -2273,14 +2273,24 @@ const exported = {
       }
     }
 
-    await this.capturePdf(page, {
-      path: `${dir}/${this.types[type].p.toUpperCase()}/${this.types[
-        type
-      ].p.toUpperCase()}.pdf`,
-      format: "Letter",
-    });
+    // The section loops below guard each item, and printSummary is wrapped, so
+    // these two calls were the only path that could throw straight past the
+    // page.close() at the end of this function and strand a CDP target. Close
+    // it here and re-throw so the caller still sees the failure.
+    let sections;
+    try {
+      await this.capturePdf(page, {
+        path: `${dir}/${this.types[type].p.toUpperCase()}/${this.types[
+          type
+        ].p.toUpperCase()}.pdf`,
+        format: "Letter",
+      });
 
-    const sections = await gettingFunction(page);
+      sections = await gettingFunction(page);
+    } catch (e) {
+      await page.close().catch(() => {});
+      throw e;
+    }
 
     let pSections = [];
     for (const section of sections) {

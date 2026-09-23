@@ -7,13 +7,17 @@ async function scrapeModule(browser, cookies, dir, sectionName, module) {
   );
 
   const page = await helpers.newPage(browser, cookies, module.url);
-  await helpers.capturePdf(page, {
-    path: `${moduleDir}/MODULE.pdf`,
-    format: "Letter",
-  });
 
   let pDownloads = [];
+  // The page is closed in the finally: a throw anywhere below would otherwise
+  // strand a live CDP target, and enough stranded targets eventually wedge the
+  // browser connection (Network.enable and friends time out).
   try {
+    await helpers.capturePdf(page, {
+      path: `${moduleDir}/MODULE.pdf`,
+      format: "Letter",
+    });
+
     pDownloads = await helpers.searchAndDownload(
       page,
       cookies,
@@ -34,10 +38,11 @@ async function scrapeModule(browser, cookies, dir, sectionName, module) {
       1,
       e
     );
+  } finally {
+    await page.close().catch(() => {});
   }
 
   helpers.print("NOTE", `MODULE '${module.name}'`, `DONE SCRAPING`, 1);
-  await page.close().catch(() => {});
   return pDownloads;
 }
 

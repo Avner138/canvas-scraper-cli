@@ -7,13 +7,15 @@ async function scrapeQuiz(browser, cookies, dir, sectionName, quiz) {
   );
 
   const page = await helpers.newPage(browser, cookies, quiz.url);
-  await helpers.capturePdf(page, {
-    path: `${quizDir}/QUIZ.pdf`,
-    format: "Letter",
-  });
 
   let pDownloads = [];
+  // Closed in the finally — see the note in scrapers/modules/index.js.
   try {
+    await helpers.capturePdf(page, {
+      path: `${quizDir}/QUIZ.pdf`,
+      format: "Letter",
+    });
+
     pDownloads = await helpers.searchAndDownload(
       page,
       cookies,
@@ -35,10 +37,11 @@ async function scrapeQuiz(browser, cookies, dir, sectionName, quiz) {
       1,
       e
     );
+  } finally {
+    await page.close().catch(() => {});
   }
 
   helpers.print("NOTE", `QUIZ '${quiz.name}'`, `DONE SCRAPING`, 1);
-  await page.close().catch(() => {});
   return pDownloads;
 }
 
