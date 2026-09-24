@@ -8,6 +8,8 @@ import { readAsset, contentType, isInlined } from "./assets.js";
 import { readLibrary } from "./library.js";
 import { readSessions } from "./sessions.js";
 import { openPath, openUrl } from "./opener.js";
+import { loadStudyList, updateEntries } from "../core/plan.js";
+import { buildSchedule, occupancyOf, ratePerDay, summarize, tomorrow } from "../core/schedule.js";
 import { findChrome, chromeInstallInstructions } from "../core/chrome.js";
 
 /**
@@ -285,6 +287,86 @@ async function handleApi(req, res, ctx) {
     const cookies = url.searchParams.get("cookies");
     const p = cookies ? path.resolve(cookies) : state.cookiesPath;
     return sendJson(res, 200, readSessions(p, state.configPath));
+  }
+
+  if (pathname === "/api/plan" && req.method === "GET") {
+    const root = path.resolve(url.searchParams.get("root") || [...roots][0] || "courses");
+    addRoot(root);
+    const list = loadStudyList(root);
+    return sendJson(res, 200, {
+      ...list,
+      summary: summarize([...list.tasks, ...list.orphans]),
+    });
+  }
+
+  // Assign dates to a course's undone tasks, in course order. Existing dates
+  // are treated as pins, so re-planning never silently moves work the user
+  // placed by hand; `reflow` deliberately drops that protection.
+  if (pathname === "/api/plan/schedule" && req.method === "POST") {
+    const body = await readBody(req);
+    const root = path.resolve(body.root || [...roots][0] || "courses");
+    addRoot(root);
+    const list = loadStudyList(root);
+
+    const scope = list.tasks.filter(
+      (t) =>
+        (!body.courseId || t.courseId === body.courseId) &&
+        t.state !== "removed" &&
+        !t.done
+    );
+    const start = body.start || tomorrow();
+    const pinned = new Map();
+    if (!body.reflow) {
+      for (const t of scope) if (t.targetDate) pinned.set(t.id, t.targetDate);
+    }
+    const unpinned = scope.filter((t) => !pinned.has(t.id)).length;
+    const perDay = body.end
+      ? ratePerDay(unpinned, start, body.end, body.skipWeekdays || [])
+      : Math.max(1, Number(body.perDay) || 1);
+
+    // Days already spoken for by tasks outside this scope, so two courses
+    // planned separately still add up to a sane day.
+    const outside = list.tasks.filter((t) => !scope.includes(t) && !t.done);
+    const plan = buildSchedule(scope, {
+      start,
+      perDay,
+      skipWeekdays: body.skipWeekdays || [],
+      pinned,
+      occupied: occupancyOf(outside),
+    });
+
+    updateEntries(
+      root,
+      plan.map((p) => {
+        const task = scope.find((t) => t.id === p.id);
+        return {
+          itemId: p.id,
+          target_date: p.date,
+          snapshot: task
+            ? { title: task.title, course: task.courseName, course_url: task.courseUrl, category: task.category }
+            : undefined,
+        };
+      })
+    );
+    return sendJson(res, 200, { scheduled: plan.length, perDay, start });
+  }
+
+  if (pathname === "/api/plan/items" && req.method === "PATCH") {
+    const body = await readBody(req);
+    const root = path.resolve(body.root || [...roots][0] || "courses");
+    addRoot(root);
+    updateEntries(root, body.updates || []);
+    return sendJson(res, 200, { ok: true, updated: (body.updates || []).length });
+  }
+
+  if (pathname === "/api/plan/clear" && req.method === "POST") {
+    const body = await readBody(req);
+    const root = path.resolve(body.root || [...roots][0] || "courses");
+    addRoot(root);
+    const list = loadStudyList(root);
+    const scope = list.tasks.filter((t) => !body.courseId || t.courseId === body.courseId);
+    updateEntries(root, scope.map((t) => ({ itemId: t.id, target_date: null })));
+    return sendJson(res, 200, { ok: true, cleared: scope.length });
   }
 
   if (pathname === "/api/open" && req.method === "POST") {

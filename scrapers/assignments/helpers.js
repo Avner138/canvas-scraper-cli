@@ -9,8 +9,13 @@ const exported = {
    * @returns {Promise<Array<string>>} array of problematic files
    */
   async scrapeDescription(page, cookies, dir) {
-    // print assignment preview (a dry-run writes nothing, so skip the folder)
-    if (!helpers.dryRun) fs.mkdirSync(`${dir}`);
+    // print assignment preview (a dry-run writes nothing, so skip the folder).
+    // recursive: true is load-bearing, not tidiness — without it this throws
+    // EEXIST on every resumed run, because the folder is already there from
+    // last time. That failure propagated to the caller's catch, so every
+    // assignment description silently stopped being captured the moment a
+    // scrape was repeated, which is exactly when resume is supposed to help.
+    if (!helpers.dryRun) fs.mkdirSync(`${dir}`, { recursive: true });
     await helpers.capturePdf(
       page,
       { path: `${dir}/ASSIGNMENT.pdf`, format: "Letter" },

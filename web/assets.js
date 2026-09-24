@@ -20,6 +20,15 @@ import path from "path";
 // Replaced at bundle time by the inline-web-assets plugin in build.mjs.
 const INLINED = null;
 
+/**
+ * Modules served to the browser that live outside web/public.
+ *
+ * The scheduler is used by both sides — the server assigns dates, the page
+ * previews them — and two copies of date arithmetic would drift. One source,
+ * served under a public name.
+ */
+export const SHARED = { "lib/schedule.js": "../core/schedule.js" };
+
 /** Media types for the handful of extensions this app actually ships. */
 const TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -58,6 +67,7 @@ export function readAsset(name) {
       const b64 = INLINED[name];
       return b64 ? Buffer.from(b64, "base64") : null;
     }
+    if (SHARED[name]) return fs.readFileSync(new URL(SHARED[name], import.meta.url));
     return fs.readFileSync(new URL(`./public/${name}`, import.meta.url));
   } catch (e) {
     return null;
@@ -82,7 +92,7 @@ export function assetNames() {
   } catch (e) {
     /* no public dir (shouldn't happen from source) */
   }
-  return out;
+  return [...out, ...Object.keys(SHARED)];
 }
 
 export default { readAsset, assetNames, contentType, isInlined };

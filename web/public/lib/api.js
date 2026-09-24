@@ -28,6 +28,18 @@ export async function api(pathname, opts = {}) {
     /* some responses have no body */
   }
   if (!res.ok) {
+    // A stale token is the one failure a user hits by accident — reloading a
+    // bookmarked page, or coming back after the server restarted, since each
+    // launch mints a new one. "bad token" tells them nothing, so say what to
+    // do about it.
+    if (res.status === 401) {
+      const err = new Error(
+        "This page's access token is no longer valid — the server has restarted since it was opened. " +
+          "Open the link the terminal printed again."
+      );
+      err.code = "stale-token";
+      throw err;
+    }
     const msg = (body && (body.error || body.reason)) || `HTTP ${res.status}`;
     throw new Error(msg);
   }

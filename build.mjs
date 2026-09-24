@@ -29,6 +29,11 @@ const inlineWebAssets = {
         }
       };
       walk("");
+      // Modules shared with the server (see SHARED in web/assets.js) live
+      // outside web/public but are served under a public name.
+      map["lib/schedule.js"] = readFileSync(
+        path.join(path.dirname(args.path), "..", "core", "schedule.js")
+      ).toString("base64");
       const src = readFileSync(args.path, "utf8");
       const out = src.replace("const INLINED = null;", `const INLINED = ${JSON.stringify(map)};`);
       if (out === src) throw new Error("inline-web-assets: INLINED placeholder not found");

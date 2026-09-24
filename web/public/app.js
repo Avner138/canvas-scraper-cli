@@ -2,6 +2,7 @@
    Plain ES modules and DOM. The server's CSP is default-src 'self', so there
    is no CDN and no framework; an el() helper is enough for these screens. */
 
+import { renderPlan } from "./screens/plan.js";
 import { renderLibrary } from "./screens/library.js";
 import { renderSessions } from "./screens/sessions.js";
 import { setToken, api, toast } from "./lib/api.js";
@@ -33,6 +34,7 @@ function claimToken() {
 }
 
 const SCREENS = {
+  plan: renderPlan,
   library: renderLibrary,
   sessions: renderSessions,
 };
@@ -42,7 +44,7 @@ let current = "";
 
 async function show(name, { focus = false } = {}) {
   const render = SCREENS[name] || SCREENS.library;
-  current = SCREENS[name] ? name : "library";
+  current = SCREENS[name] ? name : "plan";
   for (const btn of document.querySelectorAll(".navbtn")) {
     btn.setAttribute("aria-current", btn.dataset.screen === current ? "true" : "false");
   }
@@ -66,8 +68,16 @@ async function show(name, { focus = false } = {}) {
 /** A failed screen should say what failed, not go blank. */
 function errorCard(e) {
   const div = document.createElement("div");
-  div.className = "banner bad";
-  div.textContent = `Could not load this screen: ${e.message || e}`;
+  div.className = e.code === "stale-token" ? "banner warn" : "banner bad";
+  div.textContent =
+    e.code === "stale-token" ? e.message : `Could not load this screen: ${e.message || e}`;
+  if (e.code === "stale-token") {
+    try {
+      sessionStorage.removeItem("cs-token");
+    } catch (err) {
+      /* ignore */
+    }
+  }
   return div;
 }
 
@@ -100,7 +110,7 @@ function wire() {
 
 setToken(claimToken());
 wire();
-show(location.hash.replace("#", "") || "library");
+show(location.hash.replace("#", "") || "plan");
 
 // Exposed so screens can trigger a refresh after an action.
 window.__refresh = () => show(current);
