@@ -430,6 +430,7 @@ program.action(async (url, options) => {
     // action menu (Log in / About / Scrape …). Scraping browses the courses
     // first, then asks what to download — all in one terminal UI.
     if (!url) {
+      requireTty("the interactive wizard");
       await renderTui(undefined, {});
       return;
     }
@@ -444,6 +445,7 @@ program.action(async (url, options) => {
     // scrape (content defaults to everything), so don't divert to the action
     // menu for it.
     if (!hasContentFlags && !options.login && !options.courses && !options.dryRun) {
+      requireTty("the interactive menu");
       await renderTui(url, { ...options, _menu: true });
       return;
     }
@@ -452,6 +454,7 @@ program.action(async (url, options) => {
     // console. The TUI drives --login itself (as an interactive first phase),
     // so only run the standalone capture here for the non-TUI path.
     if (options.tui) {
+      requireTty("--tui");
       await renderTui(url, options);
       return;
     }
@@ -485,6 +488,34 @@ program.action(async (url, options) => {
     process.exit(1);
   }
 });
+
+/**
+ * Refuses an interactive mode when there is no terminal to be interactive in.
+ *
+ * Ink needs raw mode on stdin. Without a TTY — a pipe, a cron job, a CI step,
+ * a dev-server wrapper — it throws "Raw mode is not supported" and buries the
+ * reason under a React reconciler stack trace, which tells the reader nothing
+ * about what they did or what to do instead. Say it plainly and name the ways
+ * out.
+ * @param {string} what the mode being refused, for the message
+ */
+function requireTty(what) {
+  if (process.stdin.isTTY) return;
+  helpers.print(
+    "ERROR",
+    "TTY",
+    `${what} needs a terminal, and this process has no TTY on stdin.`,
+    0
+  );
+  helpers.print(
+    "NOTE",
+    "TTY",
+    "Run it in a terminal, or use the web app (`canvas-scraper app`), or pass " +
+      "flags for a non-interactive scrape (e.g. `--all <url>`; see --help).",
+    0
+  );
+  process.exit(1);
+}
 
 /**
  * Exits once stdout has drained, so no output is truncated on the way out.

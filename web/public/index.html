@@ -3,6 +3,11 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <!-- Filled in by the server on every request for this page. Safe to put
+         here: a cross-site page cannot read a response body, and a
+         DNS-rebinding page fails the Host allowlist before it gets this far.
+         Keeping it out of the URL also keeps it out of Referer and history. -->
+    <meta name="cs-token" content="__CS_TOKEN__" />
     <title>Canvas Archivist</title>
     <link rel="stylesheet" href="/app.css" />
   </head>

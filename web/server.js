@@ -221,7 +221,7 @@ export async function startServer(opts = {}) {
           pathname, state, roots, addRoot, token, server, runner,
         });
       }
-      return serveStatic(res, pathname);
+      return serveStatic(res, pathname, token);
     } catch (e) {
       return sendJson(res, 500, { error: e.message || String(e) });
     }
@@ -260,7 +260,7 @@ function listen(server, preferred) {
 }
 
 /** Serves the browser app. Unknown paths fall through to the SPA shell. */
-function serveStatic(res, pathname) {
+function serveStatic(res, pathname, token) {
   const name = pathname === "/" ? "index.html" : pathname.replace(/^\//, "");
   let body = readAsset(name);
   let asset = name;
@@ -272,6 +272,13 @@ function serveStatic(res, pathname) {
   if (!body) {
     res.writeHead(404, { ...BASE_HEADERS, "Content-Type": "text/plain" });
     return res.end("not found");
+  }
+  if (asset === "index.html") {
+    // The shell carries the token, so opening the bare URL works — which is
+    // what a dev-server wrapper or a bookmark does. The request has already
+    // passed the Host allowlist, and no other origin can read this body.
+    // Cache-Control is no-store for everything here, so it is never stored.
+    body = Buffer.from(body.toString("utf8").replace("__CS_TOKEN__", token));
   }
   res.writeHead(200, {
     ...BASE_HEADERS,

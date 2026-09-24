@@ -17,6 +17,11 @@ import { setToken, api, toast } from "./lib/api.js";
  * in history, and in a Referer header on any outbound link.
  */
 function claimToken() {
+  // The shell carries the token, so a bare URL works. The query string is
+  // still honoured for the link the terminal prints.
+  const meta = document.querySelector('meta[name="cs-token"]')?.content;
+  if (meta && meta !== "__CS_TOKEN__") return meta;
+
   const url = new URL(location.href);
   const fromQuery = url.searchParams.get("t");
   if (fromQuery) {
