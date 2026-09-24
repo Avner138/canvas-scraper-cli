@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Canvas Archivist</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <div class="app">
+      <nav class="rail" aria-label="Sections">
+        <div class="brand">
+          <span class="dot" aria-hidden="true"></span>
+          Canvas Archivist
+        </div>
+        <div class="rail-label">Archive</div>
+        <button class="navbtn" data-screen="library" aria-current="true">Library</button>
+        <button class="navbtn" data-screen="sessions">Sessions</button>
+        <div class="rail-foot">
+          <button class="btn sm" id="quit" title="Stop the local server">Quit</button>
+        </div>
+      </nav>
+      <main class="main" id="main" tabindex="-1">
+        <p class="muted">Loading…</p>
+      </main>
+    </div>
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

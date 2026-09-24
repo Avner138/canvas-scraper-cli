@@ -229,6 +229,70 @@ program
     }
   });
 
+// `app` subcommand: a local web UI over the archive. Loopback-only, and
+// read-only in this milestone — it reads the manifests and the cookies file
+// and can open what it finds, but it cannot start a scrape yet.
+program
+  .command("app")
+  .alias("gui")
+  .alias("serve")
+  .description(
+    "open the local web app for browsing the archive and checking sessions " +
+      "(uses the global -o/--output and -c/--cookies)"
+  )
+  .option("--port <n>", "port to listen on", (v) => parseInt(v, 10), 7373)
+  .option("--no-open", "don't launch a browser")
+  .option("--selftest", "check the app's assets are present, print a summary, exit")
+  // -o/--output and -c/--cookies are deliberately NOT redeclared here. The
+  // program already defines both, and because it also takes a positional
+  // argument, commander binds those flags to the program in every ordering —
+  // a subcommand copy would silently never receive the user's value and would
+  // hand back its own default instead. Read the program's options instead.
+  .action(async (opts, cmd) => {
+    try {
+      const parent = cmd.parent.opts();
+
+      // --selftest guards the one failure this app can ship with silently.
+      // The browser files are inlined into the bundle at build time, because
+      // a packaged binary has no web/public on disk to read. If that plugin
+      // ever stops matching, the build still succeeds and `--help` still
+      // passes — the app just serves 404s to every user. So check it in CI.
+      if (opts.selftest) {
+        const { readAsset, assetNames, isInlined } = await import("./web/assets.js");
+        const names = assetNames();
+        const missing = ["index.html", "app.css", "app.js"].filter((n) => !readAsset(n));
+        helpers.print(
+          missing.length ? "ERROR" : "NOTE",
+          "APP",
+          `selftest: ${names.length} asset(s), source=${isInlined() ? "inlined" : "disk"}` +
+            (missing.length ? ` — MISSING ${missing.join(", ")}` : ""),
+          0
+        );
+        process.exit(missing.length ? 1 : 0);
+      }
+
+      const { startServer } = await import("./web/server.js");
+      const { openUrl } = await import("./web/opener.js");
+      const srv = await startServer({
+        port: opts.port,
+        output: parent.output,
+        cookies: parent.cookies,
+      });
+      helpers.print("NOTE", "APP", `Listening on http://127.0.0.1:${srv.port}`, 0);
+      helpers.print("NOTE", "APP", `Archive: ${srv.roots[0]}`, 0);
+      // The token is in the URL, which is how a freshly opened tab gets it;
+      // the page strips it from its own address bar immediately.
+      helpers.print("NOTE", "APP", `Open: ${srv.url}`, 0);
+      helpers.print("NOTE", "APP", "Press Ctrl-C to stop, or use Quit in the app.", 0);
+      if (opts.open !== false) openUrl(srv.url);
+      // Deliberately does not resolve: the server owns the process lifetime.
+      await new Promise(() => {});
+    } catch (e) {
+      helpers.print("ERROR", "APP", e.message || String(e), 0);
+      process.exit(1);
+    }
+  });
+
 // `import` subcommand: file manually-obtained content into the scraper's own
 // layout, using the gaps recorded in report-skipped.csv / download-diagnostics.
 // No browser is needed — this is a pure filesystem operation.

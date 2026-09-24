@@ -103,6 +103,10 @@ jobs:
         run: |
           "${{ matrix.artifact }}" --help > /dev/null
           echo "started cleanly and exited $?"
+          # The web app's files are inlined at bundle time; a packaged binary
+          # has no web/public to read. If that ever breaks, the build still
+          # succeeds and --help still passes — the app just serves 404s.
+          "${{ matrix.artifact }}" app --selftest
 
       - name: Upload executable
         uses: actions/upload-artifact@v7
