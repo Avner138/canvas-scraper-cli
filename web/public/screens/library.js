@@ -1,4 +1,5 @@
 import { api, el, bytes, ago, openPath, openUrl, toast } from "../lib/api.js";
+import { openPicker } from "../lib/picker.js";
 
 /**
  * Library — the archive as an inventory rather than a folder tree.
@@ -104,31 +105,24 @@ export async function renderLibrary() {
     wrap.append(b);
   }
 
-  const bar = el("div.toolbar");
-  const input = el("input", { type: "text", value: root, spellcheck: "false" });
-  bar.append(
-    el("label", { class: "muted", for: "" }, "Archive"),
-    input,
+  wrap.append(
     el(
-      "button.btn.sm",
-      {
-        onClick: async () => {
-          const next = input.value.trim();
-          if (!next) return;
-          await api("/api/settings", {
-            method: "PUT",
-            body: JSON.stringify({ defaultRoot: next }),
-          });
-          toast("Archive folder saved");
-          window.__refresh();
+      "div.toolbar",
+      {},
+      el("span.muted", {}, "Archive"),
+      el("span.path", {}, lib.root),
+      el(
+        "button.btn.sm",
+        {
+          onClick: () =>
+            openPicker({ current: lib.root, onChoose: () => window.__refresh() }),
         },
-      },
-      "Use this folder"
-    ),
-    el("span.spacer"),
-    el("span.badge.idle", {}, `layout: ${lib.layout}`)
+        "Change…"
+      ),
+      el("span.spacer"),
+      el("span.badge.idle", {}, `layout: ${lib.layout}`)
+    )
   );
-  wrap.append(bar);
 
   if (!lib.exists) {
     wrap.append(

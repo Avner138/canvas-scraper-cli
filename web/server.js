@@ -8,6 +8,7 @@ import { readAsset, contentType, isInlined } from "./assets.js";
 import { readLibrary } from "./library.js";
 import { readSessions } from "./sessions.js";
 import { openPath, openUrl } from "./opener.js";
+import { suggestions, listDir, validate } from "./fsbrowse.js";
 import { loadStudyList, updateEntries } from "../core/plan.js";
 import { buildSchedule, occupancyOf, ratePerDay, summarize, tomorrow } from "../core/schedule.js";
 import { findChrome, chromeInstallInstructions } from "../core/chrome.js";
@@ -278,7 +279,9 @@ async function handleApi(req, res, ctx) {
   }
 
   if (pathname === "/api/library" && req.method === "GET") {
-    const root = path.resolve(url.searchParams.get("root") || [...roots][0] || "courses");
+    const root = path.resolve(
+      url.searchParams.get("root") || readSettings().defaultRoot || [...roots][0] || "courses"
+    );
     addRoot(root);
     return sendJson(res, 200, readLibrary(root));
   }
@@ -289,8 +292,48 @@ async function handleApi(req, res, ctx) {
     return sendJson(res, 200, readSessions(p, state.configPath));
   }
 
+  // Folder picking. These deliberately reach outside the registered roots:
+  // choosing a new archive means naming a folder the app has never seen. They
+  // return directory names only, never file contents.
+  if (pathname === "/api/fs/suggestions" && req.method === "GET") {
+    const settings = readSettings();
+    return sendJson(res, 200, {
+      suggestions: suggestions([settings.defaultRoot, ...(settings.recentRoots || [])]),
+    });
+  }
+
+  if (pathname === "/api/fs/list" && req.method === "GET") {
+    return sendJson(res, 200, listDir(url.searchParams.get("path") || ""));
+  }
+
+  if (pathname === "/api/fs/validate" && req.method === "POST") {
+    const body = await readBody(req);
+    return sendJson(res, 200, validate(body.path || ""));
+  }
+
+  // Remembers a chosen archive: the default, plus a short recents list so
+  // "specify a path every time" does not mean retyping it every time.
+  if (pathname === "/api/fs/use" && req.method === "POST") {
+    const body = await readBody(req);
+    const chosen = path.resolve(body.path || "");
+    const check = validate(chosen);
+    if (!check.ok) return sendJson(res, 400, check);
+    addRoot(chosen);
+    const settings = readSettings();
+    const recents = [chosen, ...(settings.recentRoots || []).filter((r) => r !== chosen)];
+    writeSettings({
+      recentRoots: recents.slice(0, 8),
+      ...(body.makeDefault ? { defaultRoot: chosen } : {}),
+    });
+    return sendJson(res, 200, { ok: true, path: chosen, ...check });
+  }
+
   if (pathname === "/api/plan" && req.method === "GET") {
-    const root = path.resolve(url.searchParams.get("root") || [...roots][0] || "courses");
+    // Same resolution order as /api/library, so the two screens never disagree
+    // about which archive is open.
+    const root = path.resolve(
+      url.searchParams.get("root") || readSettings().defaultRoot || [...roots][0] || "courses"
+    );
     addRoot(root);
     const list = loadStudyList(root);
     return sendJson(res, 200, {
@@ -304,7 +347,7 @@ async function handleApi(req, res, ctx) {
   // placed by hand; `reflow` deliberately drops that protection.
   if (pathname === "/api/plan/schedule" && req.method === "POST") {
     const body = await readBody(req);
-    const root = path.resolve(body.root || [...roots][0] || "courses");
+    const root = path.resolve(body.root || readSettings().defaultRoot || [...roots][0] || "courses");
     addRoot(root);
     const list = loadStudyList(root);
 
@@ -353,7 +396,7 @@ async function handleApi(req, res, ctx) {
 
   if (pathname === "/api/plan/items" && req.method === "PATCH") {
     const body = await readBody(req);
-    const root = path.resolve(body.root || [...roots][0] || "courses");
+    const root = path.resolve(body.root || readSettings().defaultRoot || [...roots][0] || "courses");
     addRoot(root);
     updateEntries(root, body.updates || []);
     return sendJson(res, 200, { ok: true, updated: (body.updates || []).length });
@@ -361,7 +404,7 @@ async function handleApi(req, res, ctx) {
 
   if (pathname === "/api/plan/clear" && req.method === "POST") {
     const body = await readBody(req);
-    const root = path.resolve(body.root || [...roots][0] || "courses");
+    const root = path.resolve(body.root || readSettings().defaultRoot || [...roots][0] || "courses");
     addRoot(root);
     const list = loadStudyList(root);
     const scope = list.tasks.filter((t) => !body.courseId || t.courseId === body.courseId);

@@ -305,3 +305,62 @@ input[type="text"] {
   .task { flex-wrap: wrap; }
   .taskactions { width: 100%; padding-left: 26px; }
 }
+
+/* ---------- folder picker ---------- */
+.overlay {
+  position: fixed; inset: 0; z-index: 30;
+  background: rgba(8, 12, 16, .55);
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+}
+.picker {
+  background: var(--surface); border: 1px solid var(--line-strong);
+  border-radius: 10px; padding: 18px 20px;
+  width: min(760px, 100%); max-height: min(640px, 90vh);
+  display: flex; flex-direction: column; gap: 4px;
+  box-shadow: 0 20px 60px -20px rgba(0, 0, 0, .6);
+}
+.picker h2 { margin: 0 0 2px; font-size: 16px; }
+.picker .sub { margin-bottom: 12px; }
+
+.pickerbody {
+  display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 12px;
+  min-height: 0; flex: 1 1 auto; margin-bottom: 10px;
+}
+.shortcuts { display: flex; flex-direction: column; gap: 4px; overflow-y: auto; }
+.shortcut {
+  appearance: none; border: 1px solid var(--line); background: var(--surface);
+  border-radius: 6px; padding: 6px 9px; cursor: pointer; text-align: left;
+  display: flex; flex-direction: column; gap: 1px; font: inherit; color: var(--ink);
+}
+.shortcut:hover { background: var(--surface-2); }
+.shortcutlabel { font-size: 12.5px; font-weight: 600; }
+
+.browser { border: 1px solid var(--line); border-radius: 6px; display: flex; flex-direction: column; min-height: 0; }
+.crumbs {
+  display: flex; align-items: center; gap: 8px; padding: 6px 9px;
+  border-bottom: 1px solid var(--line); flex: none; overflow-x: auto;
+}
+.dirlist { overflow-y: auto; display: flex; flex-direction: column; min-height: 140px; }
+.diritem {
+  appearance: none; border: 0; background: none; font: inherit; font-size: 13px;
+  color: var(--ink); text-align: left; padding: 6px 10px; cursor: pointer;
+  display: flex; align-items: center; gap: 8px;
+}
+.diritem:hover { background: var(--surface-2); }
+.folder { opacity: .7; }
+
+.pathbox {
+  font-family: var(--mono); font-size: 12px; padding: 6px 9px; border-radius: 6px;
+  border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink);
+  width: 100%; min-width: 0;
+}
+.pickerstatus { min-height: 20px; font-size: 12px; margin-bottom: 8px; }
+.is-bad { color: var(--bad); }
+.is-warn { color: var(--warn); }
+
+@media (max-width: 720px) {
+  .pickerbody { grid-template-columns: minmax(0, 1fr); }
+  .shortcuts { flex-direction: row; overflow-x: auto; }
+  .shortcut { flex: none; min-width: 130px; }
+}

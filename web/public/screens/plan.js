@@ -1,5 +1,6 @@
 import { api, el, ago, openPath, openUrl, toast } from "../lib/api.js";
 import { today, addDays, daysBetween, ratePerDay, tomorrow } from "../lib/schedule.js";
+import { openPicker } from "../lib/picker.js";
 
 /**
  * Plan — the archive as work to get through.
@@ -144,6 +145,20 @@ export async function renderPlan() {
       "p.sub",
       {},
       "Every downloaded reading, video, assignment and quiz as something to work through. Clicking a task opens the file itself."
+    )
+  );
+
+  wrap.append(
+    el(
+      "div.toolbar",
+      {},
+      el("span.muted", {}, "Archive"),
+      el("span.path", {}, data.root),
+      el(
+        "button.btn.sm",
+        { onClick: () => openPicker({ current: data.root, onChoose: () => refresh() }) },
+        "Change…"
+      )
     )
   );
 
