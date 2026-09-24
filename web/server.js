@@ -9,6 +9,7 @@ import { readLibrary } from "./library.js";
 import { readSessions } from "./sessions.js";
 import { openPath, openUrl } from "./opener.js";
 import { suggestions, listDir, validate } from "./fsbrowse.js";
+import { JobRunner } from "./jobs.js";
 import { loadStudyList, updateEntries } from "../core/plan.js";
 import { buildSchedule, occupancyOf, ratePerDay, summarize, tomorrow } from "../core/schedule.js";
 import { findChrome, chromeInstallInstructions } from "../core/chrome.js";
@@ -149,6 +150,8 @@ export async function startServer(opts = {}) {
   addRoot(opts.output || settings.defaultRoot || "courses");
   for (const r of settings.recentRoots || []) addRoot(r);
 
+  const runner = new JobRunner();
+
   const state = {
     cookiesPath: path.resolve(opts.cookies || settings.cookiesPath || "cookies.json"),
     configPath: path.resolve(opts.config || "config.json"),
@@ -171,7 +174,11 @@ export async function startServer(opts = {}) {
 
     const isApi = pathname.startsWith("/api/");
     if (isApi) {
-      if (req.headers["x-cs-token"] !== token) {
+      // /api/events is the one route authenticated by query string instead of
+      // header, because EventSource cannot set headers. It checks the token
+      // itself; exempting it here is what lets that check ever run.
+      const headerExempt = pathname === "/api/events";
+      if (!headerExempt && req.headers["x-cs-token"] !== token) {
         return sendJson(res, 401, { error: "bad token" });
       }
       if (req.method !== "GET") {
@@ -183,7 +190,11 @@ export async function startServer(opts = {}) {
     }
 
     try {
-      if (isApi) return await handleApi(req, res, { pathname, state, roots, addRoot, token, server });
+      if (isApi) {
+        return await handleApi(req, res, {
+          pathname, state, roots, addRoot, token, server, runner,
+        });
+      }
       return serveStatic(res, pathname);
     } catch (e) {
       return sendJson(res, 500, { error: e.message || String(e) });
@@ -246,7 +257,7 @@ function serveStatic(res, pathname) {
 
 /** The JSON API. */
 async function handleApi(req, res, ctx) {
-  const { pathname, state, roots, addRoot, server } = ctx;
+  const { pathname, state, roots, addRoot, server, runner, token } = ctx;
   const url = new URL(req.url, "http://127.0.0.1");
 
   if (pathname === "/api/state" && req.method === "GET") {
@@ -295,6 +306,107 @@ async function handleApi(req, res, ctx) {
   // Folder picking. These deliberately reach outside the registered roots:
   // choosing a new archive means naming a folder the app has never seen. They
   // return directory names only, never file contents.
+  // Live progress. One multiplexed stream rather than one per screen: HTTP/1.1
+  // allows six connections per origin, and a nine-minute scrape outlives any
+  // single screen. SSE rather than a WebSocket because it is res.write() on
+  // the server we already have — no new runtime dependency to survive esbuild
+  // and pkg, which this project has been burned by before.
+  if (pathname === "/api/events" && req.method === "GET") {
+    // EventSource cannot set headers, so this one route takes the token from
+    // the query string. Loopback-only, no-store, no-referrer.
+    if (url.searchParams.get("token") !== token) {
+      return sendJson(res, 401, { error: "bad token" });
+    }
+    res.writeHead(200, {
+      ...BASE_HEADERS,
+      "Content-Type": "text/event-stream; charset=utf-8",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    });
+    res.write(`event: hello\ndata: ${JSON.stringify({ active: runner.active })}\n\n`);
+
+    // Coalesced: streamToFile emits every 150ms per download and yt-dlp can be
+    // faster. Sending each one straight through would flood the page for no
+    // extra information.
+    let pending = null;
+    let timer = null;
+    const flush = () => {
+      timer = null;
+      if (!pending) return;
+      const batch = pending;
+      pending = null;
+      try {
+        res.write(`id: ${batch.seq}\ndata: ${JSON.stringify(batch)}\n\n`);
+      } catch (e) {
+        /* the client went away */
+      }
+    };
+    const unsubscribe = runner.subscribe((event) => {
+      // Logs and job transitions go immediately; byte progress is throttled.
+      if (event.type === "progress") {
+        pending = event;
+        if (!timer) timer = setTimeout(flush, 200);
+        return;
+      }
+      try {
+        res.write(`id: ${event.seq}\ndata: ${JSON.stringify(event)}\n\n`);
+      } catch (e) {
+        /* the client went away */
+      }
+    });
+    // A comment every 15s keeps the connection warm and reveals a dead client.
+    const keepalive = setInterval(() => {
+      try {
+        res.write(":ka\n\n");
+      } catch (e) {
+        /* ignore */
+      }
+    }, 15000);
+    req.on("close", () => {
+      unsubscribe();
+      clearInterval(keepalive);
+      if (timer) clearTimeout(timer);
+    });
+    return undefined;
+  }
+
+  if (pathname === "/api/jobs" && req.method === "GET") {
+    return sendJson(res, 200, { jobs: runner.list(), active: runner.active });
+  }
+
+  if (pathname === "/api/jobs" && req.method === "POST") {
+    const body = await readBody(req);
+    const spec = buildJobSpec(body, state, roots, addRoot);
+    if (spec.error) return sendJson(res, 400, { error: spec.error });
+    const r = runner.start(spec);
+    // Refused rather than queued: the scrapers keep per-run state in
+    // module-level singletons, so two at once would corrupt each other.
+    if (r.busy) {
+      return sendJson(res, 409, { error: "a job is already running", active: r.busy });
+    }
+    return sendJson(res, 201, { id: r.id, job: runner.get(r.id) });
+  }
+
+  const jobMatch = /^\/api\/jobs\/([A-Za-z0-9-]+)(\/[a-z-]+)?(\/.+)?$/.exec(pathname);
+  if (jobMatch) {
+    const [, id, action] = jobMatch;
+    if (!action && req.method === "GET") {
+      const job = runner.get(id);
+      return job ? sendJson(res, 200, job) : sendJson(res, 404, { error: "no such job" });
+    }
+    if (action === "/log" && req.method === "GET") {
+      const after = parseInt(url.searchParams.get("after") || "0", 10) || 0;
+      return sendJson(res, 200, { records: runner.logSlice(id, after) });
+    }
+    if (action === "/cancel" && req.method === "POST") {
+      return sendJson(res, 200, { ok: runner.cancel(id) });
+    }
+    if (action === "/prompt" && req.method === "POST") {
+      const body = await readBody(req);
+      return sendJson(res, 200, { ok: runner.reply(id, body.promptId) });
+    }
+  }
+
   if (pathname === "/api/fs/suggestions" && req.method === "GET") {
     const settings = readSettings();
     return sendJson(res, 200, {
@@ -435,6 +547,51 @@ async function handleApi(req, res, ctx) {
   }
 
   return sendJson(res, 404, { error: "no such endpoint" });
+}
+
+/**
+ * Turns a request body into a job spec, mapping UI checkboxes onto the CLI's
+ * own option names so runScrape receives exactly what the CLI would give it.
+ */
+function buildJobSpec(body, state, roots, addRoot) {
+  const kind = body.kind === "login" ? "login" : body.kind === "dry-run" ? "dry-run" : "scrape";
+  const url = String(body.url || "").trim();
+  if (!/^https:\/\/[^/]+(\/courses\/[^/?#]+)?\/?$/.test(url)) {
+    return { error: "enter a Canvas URL like https://canvas.school.edu or .../courses/123" };
+  }
+  const cookies = body.cookies ? path.resolve(body.cookies) : state.cookiesPath;
+
+  if (kind === "login") {
+    return { kind, url, cookies, loginMode: "fresh", cwd: path.dirname(state.configPath) };
+  }
+
+  const output = path.resolve(body.output || readSettings().defaultRoot || [...roots][0] || "courses");
+  addRoot(output);
+  const content = body.content || {};
+  return {
+    kind,
+    url,
+    cwd: path.dirname(state.configPath),
+    options: {
+      output,
+      cookies,
+      a: !!content.a,
+      m: !!content.m,
+      q: !!content.q,
+      v: !!content.v,
+      s: !!content.s,
+      t: !!body.transcribe,
+      dryRun: kind === "dry-run",
+      report: !!body.report,
+      wiki: !!body.wiki,
+      octarine: !!body.octarine,
+      fresh: !!body.fresh,
+      force: !!body.force,
+      prune: !!body.prune,
+      loginMode: "fresh",
+      courseIds: Array.isArray(body.courseIds) && body.courseIds.length ? body.courseIds : undefined,
+    },
+  };
 }
 
 /** chromeInstallInstructions() is advisory; never let it break /api/state. */

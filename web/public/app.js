@@ -3,6 +3,7 @@
    is no CDN and no framework; an el() helper is enough for these screens. */
 
 import { renderPlan } from "./screens/plan.js";
+import { renderRun } from "./screens/run.js";
 import { renderLibrary } from "./screens/library.js";
 import { renderSessions } from "./screens/sessions.js";
 import { setToken, api, toast } from "./lib/api.js";
@@ -35,6 +36,7 @@ function claimToken() {
 
 const SCREENS = {
   plan: renderPlan,
+  run: renderRun,
   library: renderLibrary,
   sessions: renderSessions,
 };
@@ -50,6 +52,13 @@ async function show(name, { focus = false } = {}) {
   }
   if (location.hash.replace("#", "") !== current) {
     history.replaceState({}, "", `#${current}`);
+  }
+  // A screen may hold an open stream; let it close before it is replaced.
+  for (const node of main.children) {
+    if (typeof node._cleanup === "function") node._cleanup();
+    for (const inner of node.querySelectorAll?.("*") || []) {
+      if (typeof inner._cleanup === "function") inner._cleanup();
+    }
   }
   main.replaceChildren();
   main.append(Object.assign(document.createElement("p"), {
@@ -108,7 +117,11 @@ function wire() {
   });
 }
 
-setToken(claimToken());
+const TOKEN = claimToken();
+setToken(TOKEN);
+// EventSource cannot set headers, so the SSE route takes the token in its
+// query string; the Run screen reads it from here.
+window.__token = TOKEN;
 wire();
 show(location.hash.replace("#", "") || "plan");
 

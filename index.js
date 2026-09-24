@@ -167,6 +167,21 @@ const flagDef = [
   },
 ];
 
+// Job mode, signalled by an environment variable rather than a subcommand.
+//
+// The web app re-launches this same executable to run a scrape in a child
+// process (see web/jobs.js for why it is not done in-process). An argv
+// subcommand cannot carry that signal: inside a pkg binary the bootstrap
+// intercepts the first argument as a script path to run, so the packaged
+// build silently did nothing at all while the same code worked from source —
+// the exact class of divergence that ships a binary nobody can use. An env var
+// is read identically by every runtime, and carries the spec without any
+// quoting or length limits.
+if (process.env.CANVAS_SCRAPER_JOB) {
+  const { runJob } = await import("./web/job-child.js");
+  await runJob();
+} else {
+
 const program = new Command();
 program
   .name("Canvas Scraper CLI")
@@ -268,7 +283,36 @@ program
             (missing.length ? ` — MISSING ${missing.join(", ")}` : ""),
           0
         );
-        process.exit(missing.length ? 1 : 0);
+        if (missing.length) process.exit(1);
+
+        // Round-trip a no-op job. Launching this executable as its own child
+        // is the other thing that can break silently per runtime — it did,
+        // when the signal was a subcommand and a packaged binary's bootstrap
+        // claimed it before our code ran. The binary still built and --help
+        // still passed; jobs simply never started.
+        const { JobRunner } = await import("./web/jobs.js");
+        const runner = new JobRunner();
+        const ok = await new Promise((resolve) => {
+          const timer = setTimeout(() => resolve(false), 20000);
+          runner.subscribe((e) => {
+            if (e.type === "job" && e.job && e.job.status === "done") {
+              clearTimeout(timer);
+              resolve(true);
+            }
+            if (e.type === "job" && e.job && e.job.status === "failed") {
+              clearTimeout(timer);
+              resolve(false);
+            }
+          });
+          runner.start({ kind: "noop" });
+        });
+        helpers.print(
+          ok ? "NOTE" : "ERROR",
+          "APP",
+          `selftest: child job round-trip ${ok ? "ok" : "FAILED"}`,
+          0
+        );
+        process.exit(ok ? 0 : 1);
       }
 
       const { startServer } = await import("./web/server.js");
@@ -462,3 +506,5 @@ function exitWhenFlushed(code) {
 }
 
 program.parse();
+
+} // end of non-job mode
