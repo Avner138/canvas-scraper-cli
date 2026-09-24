@@ -4,6 +4,8 @@
 
 import { renderPlan } from "./screens/plan.js";
 import { renderRun } from "./screens/run.js";
+import { renderGaps } from "./screens/gaps.js";
+import { renderDryRun } from "./screens/dryrun.js";
 import { renderLibrary } from "./screens/library.js";
 import { renderSessions } from "./screens/sessions.js";
 import { setToken, api, toast } from "./lib/api.js";
@@ -37,6 +39,8 @@ function claimToken() {
 const SCREENS = {
   plan: renderPlan,
   run: renderRun,
+  gaps: renderGaps,
+  dryrun: renderDryRun,
   library: renderLibrary,
   sessions: renderSessions,
 };

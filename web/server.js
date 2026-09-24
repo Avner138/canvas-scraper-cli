@@ -10,6 +10,13 @@ import { readSessions } from "./sessions.js";
 import { openPath, openUrl } from "./opener.js";
 import { suggestions, listDir, validate } from "./fsbrowse.js";
 import { JobRunner } from "./jobs.js";
+import {
+  readGaps,
+  saveDropped,
+  removeDropped,
+  applyImports,
+  readDryRun,
+} from "./gaps.js";
 import { loadStudyList, updateEntries } from "../core/plan.js";
 import { buildSchedule, occupancyOf, ratePerDay, summarize, tomorrow } from "../core/schedule.js";
 import { findChrome, chromeInstallInstructions } from "../core/chrome.js";
@@ -96,6 +103,25 @@ function sendJson(res, status, body) {
     "Content-Length": buf.length,
   });
   res.end(buf);
+}
+
+/** Reads a raw request body, with a size ceiling. */
+function readRaw(req, limit = 300 * 1024 * 1024) {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks = [];
+    req.on("data", (c) => {
+      size += c.length;
+      if (size > limit) {
+        reject(new Error("file too large"));
+        req.destroy();
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", reject);
+  });
 }
 
 /** Reads a JSON request body, with a size ceiling. */
@@ -438,6 +464,64 @@ async function handleApi(req, res, ctx) {
       ...(body.makeDefault ? { defaultRoot: chosen } : {}),
     });
     return sendJson(res, 200, { ok: true, path: chosen, ...check });
+  }
+
+  if (pathname === "/api/gaps" && req.method === "GET") {
+    const root = path.resolve(
+      url.searchParams.get("root") || readSettings().defaultRoot || [...roots][0] || "courses"
+    );
+    addRoot(root);
+    return sendJson(res, 200, readGaps(root));
+  }
+
+  // The browser has bytes, not a path, so a dropped file is uploaded as the
+  // raw request body — no multipart parser, no new dependency.
+  if (pathname === "/api/gaps/file" && req.method === "PUT") {
+    const root = path.resolve(
+      url.searchParams.get("root") || readSettings().defaultRoot || [...roots][0] || "courses"
+    );
+    addRoot(root);
+    try {
+      const buf = await readRaw(req);
+      return sendJson(res, 200, saveDropped(root, url.searchParams.get("name"), buf));
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  if (pathname === "/api/gaps/file" && req.method === "DELETE") {
+    const root = path.resolve(
+      url.searchParams.get("root") || readSettings().defaultRoot || [...roots][0] || "courses"
+    );
+    try {
+      return sendJson(res, 200, removeDropped(root, url.searchParams.get("name")));
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  if (pathname === "/api/gaps/import" && req.method === "POST") {
+    const body = await readBody(req);
+    const root = path.resolve(body.root || readSettings().defaultRoot || [...roots][0] || "courses");
+    addRoot(root);
+    const mappings = (body.mappings || []).filter((m) => m && m.file && m.url);
+    if (!mappings.length) return sendJson(res, 400, { error: "nothing matched yet" });
+    try {
+      // Filesystem-only, so it runs in-process: no browser, no singletons to
+      // trip over, and the result is wanted synchronously.
+      const summary = await applyImports(root, mappings, { dryRun: !!body.dryRun });
+      return sendJson(res, 200, { ok: true, summary });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  if (pathname === "/api/dry-run" && req.method === "GET") {
+    const root = path.resolve(
+      url.searchParams.get("root") || readSettings().defaultRoot || [...roots][0] || "courses"
+    );
+    addRoot(root);
+    return sendJson(res, 200, readDryRun(root));
   }
 
   if (pathname === "/api/plan" && req.method === "GET") {
