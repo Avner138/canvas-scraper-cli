@@ -197,3 +197,47 @@ test("a plan entry keyed by a synthetic item id joins back to its task", async (
   );
   assert.equal(Object.keys(entries).length, 3, "no two ids collapsed together");
 });
+
+/**
+ * Courses are paced independently, and that is deliberate.
+ *
+ * Seeding one course's schedule with the days another already occupies sounds
+ * like it prevents an overloaded day. What it actually does is make courses
+ * queue one behind another: with three courses at one a day, the second does
+ * not start until the first has finished, and its own end date sails past
+ * unmet. Found exactly that way on a real three-course archive — every early
+ * day belonged to one course and the others were pushed weeks out.
+ *
+ * Courses run concurrently in real life. Each is paced to its own deadline;
+ * the combined daily view is where a heavy day becomes visible.
+ */
+test("two courses paced to their own deadlines overlap rather than queueing", () => {
+  const start = "2026-09-24";
+  const courseA = { items: items(14), end: "2026-10-10" };
+  const courseB = { items: items(8), end: "2026-10-05" };
+
+  const planA = buildSchedule(courseA.items, {
+    start,
+    perDay: ratePerDay(courseA.items.length, start, courseA.end),
+  });
+  const planB = buildSchedule(courseB.items, {
+    start,
+    perDay: ratePerDay(courseB.items.length, start, courseB.end),
+  });
+
+  assert.equal(planA[0].date, start, "both begin on the first available day");
+  assert.equal(planB[0].date, start);
+  assert.ok(
+    planA[planA.length - 1].date <= courseA.end,
+    `A finished ${planA[planA.length - 1].date}, wanted <= ${courseA.end}`
+  );
+  assert.ok(
+    planB[planB.length - 1].date <= courseB.end,
+    `B finished ${planB[planB.length - 1].date}, wanted <= ${courseB.end}`
+  );
+
+  // The combined load on day one is the sum, which is the honest number to
+  // show someone deciding whether their plan is realistic.
+  const dayOne = [...planA, ...planB].filter((p) => p.date === start).length;
+  assert.equal(dayOne, 2);
+});

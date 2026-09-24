@@ -18,7 +18,7 @@ import {
   readDryRun,
 } from "./gaps.js";
 import { loadStudyList, updateEntries } from "../core/plan.js";
-import { buildSchedule, occupancyOf, ratePerDay, summarize, tomorrow } from "../core/schedule.js";
+import { buildSchedule, ratePerDay, summarize, tomorrow } from "../core/schedule.js";
 import { findChrome, chromeInstallInstructions } from "../core/chrome.js";
 
 /**
@@ -563,15 +563,23 @@ async function handleApi(req, res, ctx) {
       ? ratePerDay(unpinned, start, body.end, body.skipWeekdays || [])
       : Math.max(1, Number(body.perDay) || 1);
 
-    // Days already spoken for by tasks outside this scope, so two courses
-    // planned separately still add up to a sane day.
-    const outside = list.tasks.filter((t) => !scope.includes(t) && !t.done);
+    // Capacity is per course, deliberately.
+    //
+    // Seeding this with the days other courses already occupy sounds like it
+    // prevents an overloaded day, but it makes courses queue one behind
+    // another: with three courses at one a day each, the second would not
+    // start until the first had finished, and its own end date would sail past
+    // unmet. Courses run concurrently in real life. Each is paced to its own
+    // deadline, and the combined daily view is where a heavy day becomes
+    // visible — which is the point of having one.
+    //
+    // Pins still consume capacity, inside buildSchedule, because a day the
+    // user filled by hand in *this* course should not receive another.
     const plan = buildSchedule(scope, {
       start,
       perDay,
       skipWeekdays: body.skipWeekdays || [],
       pinned,
-      occupied: occupancyOf(outside),
     });
 
     updateEntries(
