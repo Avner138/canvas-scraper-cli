@@ -1,4 +1,5 @@
 import { api, el, ago, until, toast } from "../lib/api.js";
+import { watchJob, replyPrompt } from "../lib/stream.js";
 
 /**
  * Sessions — whether the captured cookies are still good, per content source.
@@ -75,7 +76,7 @@ export async function renderSessions() {
   if (!sessions.exists || sessions.error) {
     wrap.append(
       el("div.banner.bad", {}, sessions.error || "No cookies file found."),
-      loginHelp(state)
+      loginPanel(state, sessions)
     );
     return wrap;
   }
@@ -106,7 +107,7 @@ export async function renderSessions() {
     );
   }
 
-  wrap.append(loginHelp(state));
+  wrap.append(loginPanel(state, sessions));
 
   wrap.append(
     el(
@@ -121,40 +122,153 @@ export async function renderSessions() {
 }
 
 /**
- * Login is still a terminal flow in this milestone: it opens a real browser
- * window and waits on stdin. Driving it from here needs the job runner, so
- * rather than pretend, show the exact command.
+ * Capturing a session, driven from here.
+ *
+ * Login is interactive by nature: a real Chrome window opens and the user
+ * signs in themselves, which is what makes SSO and two-factor work at all. The
+ * flow asks to be told when that is done, and asks a second time after
+ * checking for Panopto and Study.Net — so the prompt mechanism is
+ * id-addressed rather than a single hard-coded "press Enter".
+ *
+ * Two windows are inherently confusing, so this screen says plainly which one
+ * wants attention, and shows the login's own log while it waits.
  */
-function loginHelp(state) {
-  const cmd = `node index.js login https://<your-canvas-domain>`;
-  return el(
-    "div.section",
-    {},
-    el("h2", {}, "Capturing a session"),
+function loginPanel(state, sessions) {
+  const box = el("div.panel.section", {});
+
+  // Pre-filled from the cookies already captured, since the domain is almost
+  // always the same one as last time.
+  const known = sessions.sources?.find((x) => x.key === "canvas")?.domains?.[0];
+  const domain = el("input.pathbox", {
+    type: "text",
+    value: known ? `https://${known}` : "",
+    placeholder: "https://canvas.your-school.edu",
+    "aria-label": "Canvas URL",
+  });
+
+  const status = el("div.loginstatus", {});
+  const logBox = el("pre.joblog", { hidden: true });
+  const actions = el("div.toolbar", {});
+
+  let close = null;
+  const appendLog = (r) => {
+    logBox.hidden = false;
+    logBox.append(
+      el(`span.l-${String(r.type || "info").toLowerCase()}`, {}, `${r.message}\n`)
+    );
+    logBox.scrollTop = logBox.scrollHeight;
+  };
+
+  const startBtn = el(
+    "button.btn.primary",
+    {
+      onClick: async () => {
+        const url = domain.value.trim();
+        if (!url) return toast("Enter your Canvas URL first");
+        try {
+          const { id } = await api("/api/jobs", {
+            method: "POST",
+            body: JSON.stringify({ kind: "login", url, cookies: state.cookiesPath }),
+          });
+          startBtn.disabled = true;
+          domain.disabled = true;
+          logBox.replaceChildren();
+          waiting(id);
+          close = watchJob(id, {
+            onLog: appendLog,
+            onPrompt: ({ promptId, message }) => {
+              if (promptId) askUser(id, promptId, message);
+              else waiting(id);
+            },
+            onEnd: (job) => finished(job),
+          });
+        } catch (e) {
+          toast(e.message);
+        }
+      },
+    },
+    "Capture session"
+  );
+
+  const cancelBtn = el(
+    "button.btn.danger.sm",
+    {
+      hidden: true,
+      onClick: async () => {
+        await api(`/api/jobs/${cancelBtn.dataset.job}/cancel`, { method: "POST" }).catch(() => {});
+      },
+    },
+    "Cancel login"
+  );
+
+  /** Chrome is open and the user has not said they are done yet. */
+  const waiting = (jobId) => {
+    cancelBtn.hidden = false;
+    cancelBtn.dataset.job = jobId;
+    status.replaceChildren(
+      el("span.badge.warn", {}, "waiting for you"),
+      el(
+        "span.meta",
+        {},
+        " A Chrome window has opened. Sign in to Canvas there — and to Panopto and Study.Net in the same window if you want videos and course-pack materials."
+      )
+    );
+    actions.replaceChildren(cancelBtn);
+  };
+
+  /** The flow is blocked on a question; answering it is one click. */
+  const askUser = (jobId, promptId, message) => {
+    cancelBtn.hidden = false;
+    cancelBtn.dataset.job = jobId;
+    status.replaceChildren(
+      el("span.badge.bad", {}, "needs you"),
+      el("span.meta", {}, ` ${(message || "").replace(/\s*press enter.*$/i, "").trim()}`)
+    );
+    actions.replaceChildren(
+      el(
+        "button.btn.primary",
+        {
+          onClick: async () => {
+            await replyPrompt(jobId, promptId).catch((e) => toast(e.message));
+            waiting(jobId);
+          },
+        },
+        "I've signed in — continue"
+      ),
+      cancelBtn
+    );
+  };
+
+  const finished = (job) => {
+    if (close) close();
+    cancelBtn.hidden = true;
+    actions.replaceChildren();
+    if (job.status === "done") {
+      status.replaceChildren(el("span.badge.ok", {}, "captured"));
+      toast("Session captured");
+      // Re-read the badges above rather than guessing what was captured.
+      setTimeout(() => window.__refresh(), 700);
+      return;
+    }
+    status.replaceChildren(
+      el("span.badge.bad", {}, job.status),
+      el("span.meta", {}, ` ${job.error || "the login did not finish"}`)
+    );
+    startBtn.disabled = false;
+    domain.disabled = false;
+  };
+
+  box.append(
+    el("h3", {}, "Capture a session"),
     el(
       "p.sub",
       {},
-      "Login opens a real Chrome window and waits for you to sign in, so for now it runs in a terminal. Driving it from this app arrives with the job runner."
+      "Opens a real Chrome window so you can sign in yourself — single sign-on and two-factor included. Nothing is typed for you, and no password passes through this app."
     ),
-    el(
-      "div.toolbar",
-      {},
-      el("code.path", {}, cmd),
-      el(
-        "button.btn.sm",
-        {
-          onClick: () => {
-            navigator.clipboard
-              ?.writeText(cmd)
-              .then(() => toast("Command copied"))
-              .catch(() => toast("Could not copy"));
-          },
-        },
-        "Copy"
-      )
-    ),
-    state.chrome?.found
-      ? null
-      : el("div.banner.warn", {}, "Google Chrome was not found — login needs it.")
+    el("div.toolbar", {}, domain, startBtn),
+    status,
+    actions,
+    logBox
   );
+  return box;
 }

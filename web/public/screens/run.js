@@ -1,5 +1,6 @@
 import { api, el, bytes, toast } from "../lib/api.js";
 import { openPicker } from "../lib/picker.js";
+import { watchJob } from "../lib/stream.js";
 
 /**
  * Run — set a scrape up, start it, and watch it.
@@ -305,25 +306,17 @@ function liveJob(job) {
 
   api(`/api/jobs/${job.id}/log`).then(({ records }) => records.forEach(appendLog)).catch(() => {});
 
-  // The stream is opened per render of this screen and closed when it goes.
-  const es = new EventSource(`/api/events?token=${encodeURIComponent(window.__token)}`);
-  es.onmessage = (ev) => {
-    let msg;
-    try {
-      msg = JSON.parse(ev.data);
-    } catch (e) {
-      return;
-    }
-    if (msg.jobId && msg.jobId !== job.id) return;
-    if (msg.type === "log") appendLog(msg.record);
-    if (msg.type === "progress") paint(msg.progress);
-    if (msg.type === "job" && msg.job?.id === job.id && msg.job.status !== "running") {
-      es.close();
-      toast(`Run ${msg.job.status}`);
+  // One shared stream helper, so Run and Sessions agree about the event shape
+  // and both handle a job that ended before the subscription was made.
+  const close = watchJob(job.id, {
+    onLog: appendLog,
+    onProgress: paint,
+    onEnd: (finished) => {
+      toast(`Run ${finished.status}`);
       window.__refresh();
-    }
-  };
-  box._cleanup = () => es.close();
+    },
+  });
+  box._cleanup = close;
 
   box.append(
     el(

@@ -54,6 +54,7 @@ export async function runJob() {
   // Imported lazily so `__job` costs nothing when the parent is just serving.
   const { runScrape } = await import("../core/scrape.js");
   const { runLogin } = await import("../core/login.js");
+  const { default: helpers } = await import("../scrapers/helpers.js");
 
   // The spec comes from the environment, which every runtime reads the same
   // way — unlike argv, which a packaged binary's bootstrap claims first.
@@ -101,10 +102,26 @@ export async function runJob() {
       process.exit(0);
     }
     if (spec.kind === "login") {
+      // runLogin builds its own logger around helpers.print rather than
+      // accepting one, so the printer is what routes its output here. Without
+      // this the login's instructions — which are the entire point, since the
+      // user is being told what to do in another window — would only reach the
+      // child's stdout.
+      helpers.setPrinter((rec) =>
+        emit({
+          type: "log",
+          record: {
+            type: rec.type,
+            name: rec.name,
+            message: rec.message,
+            indent: rec.indent,
+            additional: flatten(rec.additional),
+          },
+        })
+      );
       await runLogin(spec.url, {
         cookies: spec.cookies,
         loginMode: spec.loginMode || "fresh",
-        logger: (msg) => emit({ type: "log", record: { type: "NOTE", name: "LOGIN", message: msg } }),
         // Each prompt gets an id, because there is more than one: the flow asks
         // again after checking for Panopto and Study.Net sessions.
         prompt: (message) =>
