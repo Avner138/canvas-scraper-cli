@@ -1,5 +1,6 @@
 import fs from "fs";
 import helpers from "../helpers.js";
+import catalog from "../catalog.js";
 import report from "../report.js";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -284,10 +285,26 @@ async function scrapeStudyNet(browser, cookies, url, dir) {
           helpers.print("NOTE", "STUDY.NET", `${prefix} - ${name} (website link)`, 1);
           continue;
         }
+        const linkPath = `${studynetDir}/${prefix} - ${name}.url`;
         fs.writeFileSync(
-          `${studynetDir}/${prefix} - ${name}.url`,
+          linkPath,
           `[InternetShortcut]\r\nURL=${item.url}\r\n`
         );
+        // item.position is the instructor's ordering, already used for the
+        // filename prefix — reuse it so the catalog sorts the same way.
+        catalog.item({
+          url: item.url || linkPath,
+          title: item.name || name,
+          titleSafe: name,
+          category: "STUDYNET",
+          kind: "studynet-link",
+          section: "Study.Net Materials",
+          sectionOrdinal: 1,
+          ordinal: item.position,
+          file: linkPath,
+          role: "shortcut",
+          sourceUrl: item.url || "",
+        });
         helpers.print("NOTE", "STUDY.NET", `Saved ${prefix} - ${name}.url (website link)`, 1);
         continue;
       }
@@ -323,6 +340,19 @@ async function scrapeStudyNet(browser, cookies, url, dir) {
       const filePath = `${studynetDir}/${filename}`;
       fs.writeFileSync(filePath, Buffer.from(res.base64, "base64"));
       report.record(filePath, item.matUrl || downloadUrl);
+      catalog.item({
+        url: item.matUrl || downloadUrl,
+        title: item.name || filename,
+        titleSafe: filename,
+        category: "STUDYNET",
+        kind: "studynet-file",
+        section: "Study.Net Materials",
+        sectionOrdinal: 1,
+        ordinal: item.position,
+        file: filePath,
+        role: "attachment",
+        sourceUrl: item.matUrl || downloadUrl,
+      });
       helpers.print("NOTE", "STUDY.NET", `Saved ${filename}`, 1);
     }
 

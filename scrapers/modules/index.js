@@ -2,8 +2,13 @@ import helpers from "../helpers.js";
 
 async function scrapeModule(browser, cookies, dir, sectionName, module) {
   helpers.print("NOTE", `MODULE '${module.name}'`, `STARTING SCRAPING`, 1);
+  // The item URL is a stable identity: it survives the display name changing,
+  // so a re-run renames the folder rather than spawning a second one. Only
+  // assignments passed one before, which left modules and quizzes out of the
+  // manifest's item registry entirely.
   const moduleDir = helpers.mkUniqueDir(
-    `${dir}/MODULES/${sectionName}/${module.name}`
+    `${dir}/MODULES/${sectionName}/${module.name}`,
+    module.url
   );
 
   const page = await helpers.newPage(browser, cookies, module.url);
@@ -13,10 +18,11 @@ async function scrapeModule(browser, cookies, dir, sectionName, module) {
   // strand a live CDP target, and enough stranded targets eventually wedge the
   // browser connection (Network.enable and friends time out).
   try {
-    await helpers.capturePdf(page, {
-      path: `${moduleDir}/MODULE.pdf`,
-      format: "Letter",
-    });
+    await helpers.capturePdf(
+      page,
+      { path: `${moduleDir}/MODULE.pdf`, format: "Letter" },
+      "module"
+    );
 
     pDownloads = await helpers.searchAndDownload(
       page,

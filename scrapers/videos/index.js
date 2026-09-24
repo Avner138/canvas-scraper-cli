@@ -1,5 +1,6 @@
 import fs from "fs";
 import helpers from "../helpers.js";
+import catalog from "../catalog.js";
 import report from "../report.js";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -217,6 +218,17 @@ async function scrapeVideos(browser, cookies, url, dir) {
   } finally {
     if (coursePage) await coursePage.close().catch(() => {});
     if (toolPage) await toolPage.close().catch(() => {});
+    // Index the media from disk rather than from what this run downloaded.
+    // yt-dlp's download archive means a resumed run fetches nothing, so a
+    // recorder driven by "what appeared this run" would list the videos once
+    // and then silently lose them on every subsequent run.
+    if (!helpers.dryRun) {
+      catalog.registerTree(videosDir, {
+        category: "VIDEOS",
+        kind: "video",
+        sourceUrl: url,
+      });
+    }
     // Don't leave an empty VIDEOS/ behind when nothing downloaded (no tab, a
     // cookie wall, an empty folder) — it just looks like a broken download.
     if (!helpers.dryRun) {

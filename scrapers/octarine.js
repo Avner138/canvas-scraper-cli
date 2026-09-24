@@ -65,6 +65,8 @@ function build(dir, rows = []) {
   // Names the workspace layout owns — never swept into .attachments/.
   const reserved = new Set([
     ".attachments",
+    // User state, not scrape output — see the note in scrapers/wiki.js.
+    ".study-plan.json",
     "Courses",
     "Index.md",
     "report.csv",
@@ -249,7 +251,7 @@ function writeIndex(dir, courses, count, bytes) {
  * @returns {{course: string, category: string}}
  */
 function classify(segments) {
-  if (segments.length === 1 || KNOWN_CATEGORIES.has(segments[0])) {
+  if (segments.length === 1 || KNOWN_CATEGORIES.has(segments[0].toLowerCase())) {
     return { course: "Course", category: categoryOf(segments) };
   }
   return { course: segments[0], category: categoryOf(segments.slice(1)) };
@@ -258,7 +260,10 @@ function classify(segments) {
 /** Picks a category bucket from path segments below the course level. */
 function categoryOf(segments) {
   if (segments.length <= 1) return "overview";
-  return KNOWN_CATEGORIES.has(segments[0]) ? segments[0] : "other";
+  // Lowercased on the way out: the scrapers write UPPERCASE folders, while
+  // CATEGORY_LABEL and CATEGORY_ORDER are keyed lowercase.
+  const first = segments[0].toLowerCase();
+  return KNOWN_CATEGORIES.has(first) ? first : "other";
 }
 
 /** Rank for ordering categories; unknown categories sort last (before "other"). */

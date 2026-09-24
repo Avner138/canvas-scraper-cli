@@ -2,8 +2,11 @@ import helpers from "../helpers.js";
 
 async function scrapeQuiz(browser, cookies, dir, sectionName, quiz) {
   helpers.print("NOTE", `QUIZ '${quiz.name}'`, `STARTING SCRAPING`, 1);
+  // See the note in scrapers/modules/index.js — a stable identity so a
+  // renamed quiz is re-found rather than duplicated.
   const quizDir = helpers.mkUniqueDir(
-    `${dir}/QUIZZES/${sectionName}/${quiz.name}`
+    `${dir}/QUIZZES/${sectionName}/${quiz.name}`,
+    quiz.url
   );
 
   const page = await helpers.newPage(browser, cookies, quiz.url);
@@ -11,10 +14,11 @@ async function scrapeQuiz(browser, cookies, dir, sectionName, quiz) {
   let pDownloads = [];
   // Closed in the finally — see the note in scrapers/modules/index.js.
   try {
-    await helpers.capturePdf(page, {
-      path: `${quizDir}/QUIZ.pdf`,
-      format: "Letter",
-    });
+    await helpers.capturePdf(
+      page,
+      { path: `${quizDir}/QUIZ.pdf`, format: "Letter" },
+      "quiz"
+    );
 
     pDownloads = await helpers.searchAndDownload(
       page,

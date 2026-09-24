@@ -14,6 +14,7 @@ import { Readable } from "stream";
 
 import report from "./report.js";
 import manifest from "./manifest.js";
+import catalog from "./catalog.js";
 
 let warnedMissingYtDlp = false;
 // Cached path to the Netscape cookie file generated for yt-dlp (built once).
@@ -160,6 +161,7 @@ const exported = {
       const existing = manifest.completePath(url);
       if (existing) {
         report.record(existing, url);
+        catalog.file(existing, { role: "attachment", url });
         this.print("NOTE", "SKIP", `already downloaded ${path.basename(existing)}`, 1);
         return true;
       }
@@ -227,6 +229,7 @@ const exported = {
     await this.streamToFile(response, filePath, filename);
     if (ok) {
       report.record(filePath, url);
+      catalog.file(filePath, { role: "attachment", url });
       manifest.record(url, filePath, {
         bytes: Number(response.headers.get("content-length")) || 0,
         etag: response.headers.get("etag") || "",
@@ -721,6 +724,7 @@ const exported = {
       const existing = manifest.completePath(url);
       if (existing) {
         report.record(existing, url);
+        catalog.file(existing, { role: "attachment", url });
         this.print("NOTE", "SKIP", `already downloaded ${path.basename(existing)}`, 1);
         return true;
       }
@@ -788,6 +792,7 @@ const exported = {
     const filePath = path.join(dir, filename);
     await this.streamToFile(response, filePath, filename);
     report.record(filePath, url);
+    catalog.file(filePath, { role: "attachment", url });
     manifest.record(url, filePath, {
       bytes: Number(response.headers.get("content-length")) || 0,
       etag: response.headers.get("etag") || "",
@@ -934,6 +939,7 @@ const exported = {
         printBackground: true,
       });
       report.record(filePath, url);
+      catalog.file(filePath, { role: "attachment", url });
       return true;
     } catch (e) {
       return false;
@@ -1654,6 +1660,7 @@ const exported = {
         const filePath = path.join(dir, this.stripInvalid(filename));
         fs.writeFileSync(filePath, buf);
         report.record(filePath, retrieveUrl);
+        catalog.file(filePath, { role: "attachment", url: retrieveUrl });
         return { handled: true, ok: true };
       }
 
@@ -1853,6 +1860,11 @@ const exported = {
       return;
     }
     await page.pdf(options);
+    // Every page PDF in the project funnels through here, which is why one
+    // line covers HOMEPAGE/ASSIGNMENTS/ASSIGNMENT/SUBMISSIONDETAILS/MODULE/
+    // QUIZ. None of them has a source URL or a manifest entry, so before this
+    // the primary artifact of an item was invisible to everything downstream.
+    catalog.file(options.path, { role: kind === "submission" ? "submission" : "page" });
   },
 
   /**
@@ -2074,6 +2086,71 @@ const exported = {
   },
 
   /**
+   * Fetches this course's assignment dates from the Canvas REST API.
+   *
+   * The scraper renders due dates into ASSIGNMENT.pdf as pixels and keeps
+   * nothing as data, so a planner has no date to anchor to. One paginated call
+   * fixes that for assignments — and for quizzes too, because Canvas surfaces
+   * a graded quiz as an assignment carrying a `quiz_id`, so keying on that as
+   * well covers the quizzes index without a second request.
+   *
+   * Keys are normalized URLs, matching how the catalog ids its items. Module
+   * items are the known gap: they link to /modules/items/NNN, which matches
+   * none of these keys, so they get a date only when they link straight to an
+   * assignment.
+   *
+   * Never throws. Dates are an enrichment, not a dependency — pacing is driven
+   * by the end date the user sets — so a 403 here (an observer enrolment, or
+   * an institution blocking cookie-auth API access) must not fail a scrape.
+   * @param {string} courseUrl e.g "<canvas url>/courses/38628"
+   * @param {Array<object>} cookies session cookies
+   * @returns {Promise<Map<string, object>>} normalized url -> {due_at, ...}
+   */
+  async getAssignmentDates(courseUrl, cookies) {
+    const out = new Map();
+    try {
+      const cookieHeader = cookies
+        .map((cookie) => `${cookie.name}=${cookie.value}`)
+        .join("; ");
+      let url = `${courseUrl.replace("/courses/", "/api/v1/courses/")}/assignments?per_page=100`;
+      let guard = 0;
+      while (url && guard++ < 50) {
+        const res = await this.fetchTracked(url, {
+          headers: { Cookie: cookieHeader, Accept: "application/json" },
+        });
+        if (!res.ok) {
+          this.discardBody(res);
+          break;
+        }
+        const page = await res.json();
+        if (!Array.isArray(page)) break;
+        for (const a of page) {
+          const dates = {
+            due_at: a.due_at || null,
+            unlock_at: a.unlock_at || null,
+            points_possible: a.points_possible ?? null,
+          };
+          const keys = [a.html_url, `${courseUrl}/assignments/${a.id}`];
+          if (a.quiz_id) keys.push(`${courseUrl}/quizzes/${a.quiz_id}`);
+          for (const k of keys) {
+            if (k) out.set(catalog.key(k), dates);
+          }
+        }
+        // Follow rel="next" the same way listCourses does.
+        const link = res.headers.get("link") || "";
+        const next = link
+          .split(",")
+          .map((part) => part.trim())
+          .find((part) => /rel="next"/.test(part));
+        url = next ? (next.match(/<([^>]+)>/) || [])[1] : null;
+      }
+    } catch (e) {
+      // Non-fatal by design.
+    }
+    return out;
+  },
+
+  /**
    * Gets all sections from a page
    * @param {Page} page page to scrape from
    * @param {string} sectionSelector selector for sections
@@ -2118,8 +2195,14 @@ const exported = {
     );
 
     for (let section of sections) {
+      // Keep the pre-sanitize text: stripInvalid replaces "/", ":" and friends
+      // with "-" to make a legal folder name, so `name` is the filesystem form
+      // and `rawName` is what the instructor actually wrote. The catalog
+      // records both, and a front-end should display rawName.
+      section.rawName = section.name;
       section.name = this.stripInvalid(section.name);
       for (let link of section.links) {
+        link.rawName = link.name;
         link.name = this.stripInvalid(link.name);
         if (link.grade) link.grade = this.stripInvalid(link.grade);
       }
@@ -2159,6 +2242,16 @@ const exported = {
    * @returns {string} the path actually used (may carry a " (n)" suffix)
    */
   mkUniqueDir(desiredPath, identity = null) {
+    // One public entry point wrapping the real resolver, so the catalog learns
+    // an item's folder without every scraper having to remember to tell it —
+    // and without touching the five return points inside _mkUniqueDir.
+    const resolved = this._mkUniqueDir(desiredPath, identity);
+    catalog.noteDir(resolved);
+    return resolved;
+  },
+
+  /** The real directory resolver. See mkUniqueDir for the contract. */
+  _mkUniqueDir(desiredPath, identity = null) {
     // Dry-run writes nothing, so don't create (or uniquify) any directories;
     // just hand back the path callers use to build download destinations.
     if (this.dryRun) return desiredPath;
@@ -2340,12 +2433,16 @@ const exported = {
     // it here and re-throw so the caller still sees the failure.
     let sections;
     try {
-      await this.capturePdf(page, {
-        path: `${dir}/${this.types[type].p.toUpperCase()}/${this.types[
-          type
-        ].p.toUpperCase()}.pdf`,
-        format: "Letter",
-      });
+      await this.capturePdf(
+        page,
+        {
+          path: `${dir}/${this.types[type].p.toUpperCase()}/${this.types[
+            type
+          ].p.toUpperCase()}.pdf`,
+          format: "Letter",
+        },
+        "category-index"
+      );
 
       sections = await gettingFunction(page);
     } catch (e) {
@@ -2354,7 +2451,8 @@ const exported = {
     }
 
     let pSections = [];
-    for (const section of sections) {
+    const category = this.types[type].p.toUpperCase();
+    for (const [sectionIndex, section] of sections.entries()) {
       try {
         let pLinks = [];
         this.print(
@@ -2363,6 +2461,9 @@ const exported = {
           `STARTING SCRAPING`,
           0
         );
+        // Captured before the reassignment below, which replaces the display
+        // name with the (possibly " (2)"-suffixed) folder name.
+        const sectionTitle = section.rawName || section.name;
         // Section names are sanitized and can collide (e.g. several
         // "untitled" sections). Create a unique directory and adopt its name
         // so the scrapingFunction below writes into the same folder.
@@ -2370,7 +2471,22 @@ const exported = {
           `${dir}/${this.types[type].p.toUpperCase()}/${section.name}`
         );
         section.name = path.basename(sectionDir);
-        for (const link of section.links) {
+        for (const [linkIndex, link] of section.links.entries()) {
+          // Open the item for the duration of its scrape so every file it
+          // writes attaches to it. The finally is deliberately tight around
+          // just this call: a begin without a matching end would mis-attribute
+          // every later file in the run, silently and plausibly.
+          const token = catalog.beginItem({
+            url: link.url,
+            title: link.rawName || link.name,
+            titleSafe: link.name,
+            category,
+            kind: this.types[type].s,
+            section: sectionTitle,
+            sectionOrdinal: sectionIndex + 1,
+            ordinal: linkIndex + 1,
+            grade: link.grade || null,
+          });
           try {
             let pDownloads = await scrapingFunction(
               browser,
@@ -2389,6 +2505,8 @@ const exported = {
               1,
               e
             );
+          } finally {
+            catalog.endItem(token);
           }
         }
         if (pLinks.length > 0)

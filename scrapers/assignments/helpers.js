@@ -11,10 +11,11 @@ const exported = {
   async scrapeDescription(page, cookies, dir) {
     // print assignment preview (a dry-run writes nothing, so skip the folder)
     if (!helpers.dryRun) fs.mkdirSync(`${dir}`);
-    await helpers.capturePdf(page, {
-      path: `${dir}/ASSIGNMENT.pdf`,
-      format: "Letter",
-    });
+    await helpers.capturePdf(
+      page,
+      { path: `${dir}/ASSIGNMENT.pdf`, format: "Letter" },
+      "assignment"
+    );
 
     // gather and download links to files embeded in assignment description
     let problematic = await helpers.searchAndDownload(
@@ -46,10 +47,11 @@ const exported = {
 
     let newPage = await helpers.newPage(page.browser(), cookies, link);
     try {
-      await helpers.capturePdf(newPage, {
-        path: `${dir}/SUBMISSIONDETAILS.pdf`,
-        format: "Letter",
-      });
+      await helpers.capturePdf(
+        newPage,
+        { path: `${dir}/SUBMISSIONDETAILS.pdf`, format: "Letter" },
+        "submission"
+      );
     } finally {
       await newPage.close().catch(() => {});
     }

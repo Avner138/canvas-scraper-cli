@@ -7,6 +7,7 @@ import helpers from "../scrapers/helpers.js";
 import scrapers from "../scrapers/index.js";
 import report from "../scrapers/report.js";
 import manifest from "../scrapers/manifest.js";
+import catalog from "../scrapers/catalog.js";
 import wiki from "../scrapers/wiki.js";
 import octarine from "../scrapers/octarine.js";
 
@@ -280,9 +281,26 @@ async function scrapeCourse(
   // (which writes nothing and probes accessibility instead). A --fresh run just
   // wiped the folder, so the manifest starts empty and everything re-downloads.
   if (!helpers.dryRun) manifest.load(courseDir, courseUrl);
+  // The item catalog rides the same lifecycle: it indexes what the course
+  // contains, where each item landed, and in what order — the things a
+  // front-end needs and the manifest deliberately doesn't track.
+  if (!helpers.dryRun) {
+    catalog.load(courseDir, {
+      id: (courseUrl.match(/\/courses\/([^/?#]+)/) || [])[1] || "",
+      name: courseName || "",
+      url: courseUrl,
+    });
+  }
   // Fresh per-course folder-reuse tracking so item folders from a previous run
   // are reused in place rather than duplicated with a " (n)" suffix.
   helpers.resetCreatedDirs();
+
+  // Canvas dates, fetched once per course rather than per phase: keyed by URL,
+  // the same map enriches assignments, quizzes, and any module item that links
+  // straight to an assignment — so it runs even when -a is off. Never throws.
+  if (!helpers.dryRun) {
+    catalog.applyDates(await helpers.getAssignmentDates(courseUrl, cookies));
+  }
 
   // Everything from here is wrapped so the manifest is ALWAYS persisted in the
   // finally — even when the homepage is unreachable (e.g. expired cookies) or a
@@ -320,7 +338,11 @@ async function scrapeCourse(
       const title = await page.title().catch(() => "");
       if (title) report.setCourse(title.trim(), courseUrl);
     }
-    await helpers.capturePdf(page, { path: `${courseDir}/HOMEPAGE.pdf`, format: "Letter" });
+    await helpers.capturePdf(
+      page,
+      { path: `${courseDir}/HOMEPAGE.pdf`, format: "Letter" },
+      "course-home"
+    );
     await page.close().catch(() => {});
 
     for (const [key, label, fn] of PHASES) {
@@ -340,6 +362,7 @@ async function scrapeCourse(
       for (const [key] of PHASES) {
         if (toScrape[key] && CATEGORY_BY_KEY[key]) categories.add(CATEGORY_BY_KEY[key]);
       }
+      catalog.reconcile(categories);
       const { removed, pruned } = manifest.reconcile(categories);
       if (pruned) {
         helpers.print(
@@ -363,7 +386,9 @@ async function scrapeCourse(
     // Persist progress even on early return / error, then clear per-course
     // state so it never leaks into the next course.
     if (!helpers.dryRun) manifest.save();
+    if (!helpers.dryRun) catalog.save();
     manifest.reset();
+    catalog.reset();
   }
 }
 
@@ -593,6 +618,7 @@ export async function runScrape(url, options, hooks = {}) {
         0,
         err
       );
+      catalog.save();
       flushReports(flushLatch, dir, options);
     } catch (e) {
       /* never let the rescue path itself throw */
@@ -604,6 +630,7 @@ export async function runScrape(url, options, hooks = {}) {
   const onInterrupt = () => {
     try {
       helpers.print("WARNING", "INTERRUPT", "Interrupted — saving progress...", 0);
+      catalog.save();
       flushReports(flushLatch, dir, options);
     } catch (e) {
       /* never let the rescue path itself throw */

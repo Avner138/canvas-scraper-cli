@@ -103,6 +103,9 @@ const catalog = {
   // Monotonic counters: item tokens, and the course-wide ordinal.
   _token: 0,
   _seq: 0,
+  // Dates fetched for this course, held until there are items to attach them
+  // to. The fetch happens once up front; the items appear as phases run.
+  _dates: null,
 
   /**
    * Loads a course's catalog and makes it current. A missing, unreadable, or
@@ -126,6 +129,7 @@ const catalog = {
       this.open = null;
       this._token = 0;
       this._seq = 0;
+      this._dates = null;
       this.enabled = true;
       this.runStart = new Date().toISOString();
 
@@ -152,6 +156,7 @@ const catalog = {
     this.open = null;
     this._token = 0;
     this._seq = 0;
+    this._dates = null;
   },
 
   /**
@@ -194,11 +199,13 @@ const catalog = {
     const prev = this.prior.get(spec.id);
     return {
       id: spec.id,
-      title: spec.title || "",
-      title_safe: spec.titleSafe || spec.title || "",
+      // Trimmed: Canvas section headers and item links routinely carry leading
+      // or trailing whitespace from the DOM, which reads as a typo in a list.
+      title: String(spec.title || "").trim(),
+      title_safe: String(spec.titleSafe || spec.title || "").trim(),
       category: spec.category || "",
       kind: spec.kind || "",
-      section: spec.section || "",
+      section: String(spec.section || "").trim(),
       section_ordinal: Number(spec.sectionOrdinal) || 0,
       ordinal: Number(spec.ordinal) || 0,
       sort_key: sortKey(spec.category, spec.sectionOrdinal, spec.ordinal),
@@ -417,16 +424,27 @@ const catalog = {
   applyDates(map) {
     try {
       if (!this.enabled || !map || !map.size) return;
-      for (const item of this.seen.values()) {
-        const hit = map.get(item.id);
-        if (!hit) continue;
-        item.due_at = hit.due_at || null;
-        item.unlock_at = hit.unlock_at || null;
-        item.points_possible = hit.points_possible ?? null;
-        item.dates_source = "api:assignments";
-      }
+      // Held as well as applied: the fetch happens once, before any phase has
+      // run, so most items do not exist yet. reconcile() applies them again
+      // once everything has been recorded, which makes the call order here
+      // irrelevant.
+      this._dates = map;
+      this._applyDates();
     } catch (e) {
       /* ignore */
+    }
+  },
+
+  /** Attaches any held dates to the items recorded so far. */
+  _applyDates() {
+    if (!this._dates || !this._dates.size) return;
+    for (const item of this.seen.values()) {
+      const hit = this._dates.get(item.id);
+      if (!hit) continue;
+      item.due_at = hit.due_at || null;
+      item.unlock_at = hit.unlock_at || null;
+      item.points_possible = hit.points_possible ?? null;
+      item.dates_source = "api:assignments";
     }
   },
 
@@ -443,6 +461,9 @@ const catalog = {
     const result = { carried: 0, removed: 0 };
     try {
       if (!this.enabled) return result;
+      // Everything is recorded by now, so any dates fetched up front finally
+      // have items to land on.
+      this._applyDates();
       for (const [id, prev] of this.prior) {
         if (this.seen.has(id)) continue;
         const scoped = categories && categories.size;

@@ -22,6 +22,9 @@ import path from "path";
 // Top-level names the wiki layout owns — never swept into raw/.
 const RESERVED = new Set([
   "raw",
+  // The study plan is the user's own state and lives at the archive root; it
+  // must never be swept into raw/ (readdirSync includes dotfiles).
+  ".study-plan.json",
   "wiki",
   "index.md",
   "log.md",
@@ -168,7 +171,7 @@ function reindex(dir, rows = [], logMessage = null) {
  */
 function classify(segments) {
   // Single-course scrape: raw/ holds category folders / HOMEPAGE.pdf directly.
-  if (segments.length === 1 || KNOWN_CATEGORIES.has(segments[0])) {
+  if (segments.length === 1 || KNOWN_CATEGORIES.has(segments[0].toLowerCase())) {
     return { course: "Course", category: categoryOf(segments) };
   }
   // Multi-course scrape: raw/<course>/<category>/...
@@ -181,7 +184,10 @@ function classify(segments) {
 /** Picks a category bucket from path segments below the course level. */
 function categoryOf(segments) {
   if (segments.length <= 1) return "overview"; // course-root file (e.g. HOMEPAGE.pdf)
-  return KNOWN_CATEGORIES.has(segments[0]) ? segments[0] : "other";
+  // Lowercased on the way out: the scrapers write UPPERCASE folders, while
+  // CATEGORY_LABEL and CATEGORY_ORDER are keyed lowercase.
+  const first = segments[0].toLowerCase();
+  return KNOWN_CATEGORIES.has(first) ? first : "other";
 }
 
 /** Writes index.md: the catalog of every raw source, grouped and linked. */
